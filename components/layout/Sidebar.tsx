@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createBrowserClient } from "@supabase/ssr";
+import { useState, useEffect } from "react";
 
 const NAV = [
   { label: "Dashboard",        href: "/dashboard",                icon: LayoutDashboard },
@@ -30,6 +31,24 @@ export default function Sidebar() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
+  const [companyName, setCompanyName] = useState("MaterialFlow");
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchSettings = async () => {
+      const { data } = await supabase
+        .from("company_settings")
+        .select("company_name, logo_url")
+        .limit(1)
+        .maybeSingle();
+      if (data) {
+        setCompanyName(data.company_name || "MaterialFlow");
+        setLogoUrl(data.logo_url || null);
+      }
+    };
+    fetchSettings();
+  }, []);
+
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     router.push("/");
@@ -37,13 +56,20 @@ export default function Sidebar() {
 
   return (
     <aside className="fixed inset-y-0 left-0 z-30 flex w-60 flex-col border-r border-gray-100 bg-white">
-      {/* Logo */}
-      <div className="flex h-16 items-center gap-2 border-b border-gray-100 px-5">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-green-400">
-          <Package className="h-4 w-4 text-white" />
-        </div>
+      {/* Logo – click to go to settings */}
+      <div
+        className="flex h-16 items-center gap-2 border-b border-gray-100 px-5 cursor-pointer hover:bg-gray-50 transition-colors"
+        onClick={() => router.push("/dashboard/settings")}
+      >
+        {logoUrl ? (
+          <img src={logoUrl} alt="Logo" className="h-8 w-8 rounded-lg object-contain" />
+        ) : (
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-green-400">
+            <Package className="h-4 w-4 text-white" />
+          </div>
+        )}
         <div>
-          <p className="text-sm font-semibold text-gray-900">MaterialFlow</p>
+          <p className="text-sm font-semibold text-gray-900">{companyName}</p>
           <p className="text-[10px] text-gray-400">by OneAccounts</p>
         </div>
       </div>
