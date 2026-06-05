@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, Truck, FileText, Wrench,
   RotateCcw, Package, Send, BarChart3, ShoppingBag,
-  ChevronRight, Settings,
+  ChevronRight, Settings, Shield,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createBrowserClient } from "@supabase/ssr";
@@ -33,6 +33,7 @@ export default function Sidebar() {
 
   const [companyName, setCompanyName] = useState("MaterialFlow");
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -46,7 +47,21 @@ export default function Sidebar() {
         setLogoUrl(data.logo_url || null);
       }
     };
+
+    const checkAdmin = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", user.id)
+        .eq("role", "admin")
+        .maybeSingle();
+      setIsAdmin(!!data);
+    };
+
     fetchSettings();
+    checkAdmin();
   }, []);
 
   const handleSignOut = async () => {
@@ -56,7 +71,7 @@ export default function Sidebar() {
 
   return (
     <aside className="fixed inset-y-0 left-0 z-30 flex w-60 flex-col border-r border-gray-100 bg-white">
-      {/* Logo – click to go to settings */}
+      {/* Logo */}
       <div
         className="flex h-16 items-center gap-2 border-b border-gray-100 px-5 cursor-pointer hover:bg-gray-50 transition-colors"
         onClick={() => router.push("/dashboard/settings")}
@@ -97,10 +112,23 @@ export default function Sidebar() {
           );
         })}
 
-        {/* Divider */}
         <div className="border-t border-gray-100 my-2" />
 
-        {/* Settings link */}
+        {/* Admin – only visible to users with admin role */}
+        {isAdmin && (
+          <Link
+            href="/dashboard/admin"
+            className={cn(
+              "sidebar-item",
+              path === "/dashboard/admin" && "active"
+            )}
+          >
+            <Shield className="h-4 w-4 flex-shrink-0" />
+            <span className="flex-1">Admin</span>
+          </Link>
+        )}
+
+        {/* Settings */}
         <Link
           href="/dashboard/settings"
           className={cn(
@@ -113,7 +141,7 @@ export default function Sidebar() {
         </Link>
       </nav>
 
-      {/* Footer with Sign Out */}
+      {/* Footer */}
       <div className="border-t border-gray-100 p-4 space-y-2">
         <button
           onClick={handleSignOut}
