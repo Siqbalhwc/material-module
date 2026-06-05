@@ -1,12 +1,14 @@
 "use client";
+
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, Truck, FileText, Wrench,
   RotateCcw, Package, Send, BarChart3, ShoppingBag,
   ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { createBrowserClient } from "@supabase/ssr";
 
 const NAV = [
   { label: "Dashboard",        href: "/dashboard",                icon: LayoutDashboard },
@@ -22,12 +24,22 @@ const NAV = [
 
 export default function Sidebar() {
   const path = usePathname();
+  const router = useRouter();
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    router.push("/");
+  };
 
   return (
     <aside className="fixed inset-y-0 left-0 z-30 flex w-60 flex-col border-r border-gray-100 bg-white">
       {/* Logo */}
       <div className="flex h-16 items-center gap-2 border-b border-gray-100 px-5">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-400">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-green-400">
           <Package className="h-4 w-4 text-white" />
         </div>
         <div>
@@ -60,8 +72,14 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* Footer */}
-      <div className="border-t border-gray-100 p-4">
+      {/* Footer with Sign Out */}
+      <div className="border-t border-gray-100 p-4 space-y-2">
+        <button
+          onClick={handleSignOut}
+          className="w-full text-left text-xs text-gray-500 hover:text-red-600 transition-colors flex items-center gap-2"
+        >
+          <span className="text-base">🚪</span> Sign Out
+        </button>
         <p className="text-[10px] text-gray-400 text-center">
           O + R – C &nbsp;|&nbsp; Material Management v0.1
         </p>
