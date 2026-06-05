@@ -1,4 +1,4 @@
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
+import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
@@ -10,7 +10,22 @@ const supabaseAdmin = createClient(
 )
 
 export async function POST(request: Request) {
-  const supabase = createRouteHandlerClient({ cookies })
+  const cookieStore = await cookies()
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() { return cookieStore.getAll() },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            cookieStore.set(name, value, options)
+          )
+        },
+      },
+    }
+  )
+
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
@@ -28,22 +43,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Email and password are required' }, { status: 400 })
   }
 
-  // Create the auth user (Supabase Admin API)
+  // Create the auth user via Supabase Admin API
   const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
     email,
     password,
-    email_confirm: true,  // auto‑confirm
+    email_confirm: true,
     user_metadata: { full_name: fullName },
   })
   if (createError) {
     return NextResponse.json({ error: createError.message }, { status: 500 })
   }
 
-  // Insert into app_users (for backward compatibility)
+  // Insert into app_users for backward compatibility
   await supabaseAdmin.from('app_users').insert({
     id: newUser.user.id,
     full_name: fullName || email,
-    role: roles.join(',')  // comma‑separated for legacy single‑column
+    role: roles.join(','),
   })
 
   // Insert selected roles
@@ -59,11 +74,26 @@ export async function POST(request: Request) {
 }
 
 export async function GET() {
-  const supabase = createRouteHandlerClient({ cookies })
+  const cookieStore = await cookies()
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() { return cookieStore.getAll() },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            cookieStore.set(name, value, options)
+          )
+        },
+      },
+    }
+  )
+
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  // Fetch all users with their roles
+  // Fetch all auth users
   const { data: users } = await supabaseAdmin.auth.admin.listUsers()
   const { data: allRoles } = await supabaseAdmin.from('user_roles').select('*')
 
