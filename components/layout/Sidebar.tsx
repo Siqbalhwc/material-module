@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, Truck, FileText, Wrench,
   RotateCcw, Package, Send, BarChart3, ShoppingBag,
-  ChevronRight,
+  ChevronRight, Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createBrowserClient } from "@supabase/ssr";
@@ -96,6 +96,21 @@ export default function Sidebar() {
             </Link>
           );
         })}
+
+        {/* Divider */}
+        <div className="border-t border-gray-100 my-2" />
+
+        {/* Settings link */}
+        <Link
+          href="/dashboard/settings"
+          className={cn(
+            "sidebar-item",
+            path.startsWith("/dashboard/settings") && "active"
+          )}
+        >
+          <Settings className="h-4 w-4 flex-shrink-0" />
+          <span className="flex-1">Settings</span>
+        </Link>
       </nav>
 
       {/* Footer with Sign Out */}
