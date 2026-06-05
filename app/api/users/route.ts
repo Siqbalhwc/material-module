@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     {
       cookies: {
         getAll() { return cookieStore.getAll() },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: Array<{ name: string; value: string; options?: Record<string, unknown> }>) {
           cookiesToSet.forEach(({ name, value, options }) =>
             cookieStore.set(name, value, options)
           )
@@ -29,7 +29,6 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  // Only admin can create users
   const { data: isAdmin } = await supabaseAdmin
     .from('user_roles')
     .select('id')
@@ -43,7 +42,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Email and password are required' }, { status: 400 })
   }
 
-  // Create the auth user via Supabase Admin API
   const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
     email,
     password,
@@ -54,14 +52,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: createError.message }, { status: 500 })
   }
 
-  // Insert into app_users for backward compatibility
   await supabaseAdmin.from('app_users').insert({
     id: newUser.user.id,
     full_name: fullName || email,
     role: roles.join(','),
   })
 
-  // Insert selected roles
   if (roles && roles.length > 0) {
     const roleRows = roles.map((role: string) => ({
       user_id: newUser.user.id,
@@ -81,7 +77,7 @@ export async function GET() {
     {
       cookies: {
         getAll() { return cookieStore.getAll() },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: Array<{ name: string; value: string; options?: Record<string, unknown> }>) {
           cookiesToSet.forEach(({ name, value, options }) =>
             cookieStore.set(name, value, options)
           )
@@ -93,7 +89,6 @@ export async function GET() {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  // Fetch all auth users
   const { data: users } = await supabaseAdmin.auth.admin.listUsers()
   const { data: allRoles } = await supabaseAdmin.from('user_roles').select('*')
 
