@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Plus, FileText, Eye, Search, ArrowUpDown, ArrowUp, ArrowDown, Settings2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { formatDate, cn, REQ_STATUS_COLORS, STORE_LABELS } from "@/lib/utils";
+import type { StoreType } from "@/types";
 
 type RequisitionWithMeta = {
   id: string;
@@ -190,11 +191,11 @@ export default function RequisitionsPage() {
                 {filtered.map((r) => (
                   <tr key={r.id} className="hover:bg-gray-50 transition-colors">
                     {visibleColumns.req_number && <td className="table-td font-mono text-xs font-medium text-brand-600">{r.req_number}</td>}
-                    {visibleColumns.from_store && <td className="table-td text-xs">{STORE_LABELS[r.from_store] || r.from_store}</td>}
-                    {visibleColumns.to_store && <td className="table-td text-xs">{STORE_LABELS[r.to_store] || r.to_store}</td>}
+                    {visibleColumns.from_store && <td className="table-td text-xs">{STORE_LABELS[r.from_store as StoreType] || r.from_store}</td>}
+                    {visibleColumns.to_store && <td className="table-td text-xs">{STORE_LABELS[r.to_store as StoreType] || r.to_store}</td>}
                     {visibleColumns.item_count && <td className="table-td text-center">{r.item_count}</td>}
                     {visibleColumns.required_date && <td className="table-td">{r.required_date ? formatDate(r.required_date) : "—"}</td>}
-                    {visibleColumns.status && <td className="table-td"><span className={cn("badge", REQ_STATUS_COLORS[r.status])}>{r.status}</span></td>}
+                    {visibleColumns.status && <td className="table-td"><span className={cn("badge", REQ_STATUS_COLORS[r.status as RequisitionStatus])}>{r.status}</span></td>}
                     <td className="table-td">
                       <Link href={`/requisitions/${r.id}`} className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-brand-600 transition-colors">
                         <Eye className="h-3.5 w-3.5" /> View
