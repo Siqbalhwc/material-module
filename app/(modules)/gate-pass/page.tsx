@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo } from "react";
 import Header from "@/components/layout/Header";
 import Link from "next/link";
-import { Plus, Truck, Eye, Search, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { Plus, Truck, Eye, Search, ArrowUpDown, ArrowUp, ArrowDown, Settings2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { formatDate, cn } from "@/lib/utils";
 
@@ -36,6 +36,17 @@ export default function GatePassPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortField, setSortField] = useState<SortField>("received_date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  // Column visibility
+  const [visibleColumns, setVisibleColumns] = useState({
+    igp_number: true,
+    received_date: true,
+    supplier_name: true,
+    vehicle_number: true,
+    item_count: true,
+    status: true,
+  });
+  const [showColumnMenu, setShowColumnMenu] = useState(false);
 
   const supabase = createClient();
 
@@ -75,7 +86,6 @@ export default function GatePassPage() {
     fetchGatePasses();
   }, []);
 
-  // Filter & sort
   const filtered = useMemo(() => {
     let list = [...records];
 
@@ -91,7 +101,6 @@ export default function GatePassPage() {
 
     list.sort((a, b) => {
       let valA: any, valB: any;
-
       switch (sortField) {
         case "igp_number": valA = a.igp_number; valB = b.igp_number; break;
         case "received_date": valA = a.received_date; valB = b.received_date; break;
@@ -101,7 +110,6 @@ export default function GatePassPage() {
         case "status": valA = a.status; valB = b.status; break;
         default: return 0;
       }
-
       if (typeof valA === "string") {
         return sortDir === "asc" ? valA.localeCompare(valB) : valB.localeCompare(valA);
       } else {
@@ -130,6 +138,10 @@ export default function GatePassPage() {
     );
   };
 
+  const toggleColumn = (key: keyof typeof visibleColumns) => {
+    setVisibleColumns(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
   return (
     <>
       <Header
@@ -142,16 +154,47 @@ export default function GatePassPage() {
         }
       />
       <main className="flex-1 p-6 space-y-4">
-        {/* Search */}
-        <div className="relative max-w-sm">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search by IGP No., Supplier or Vehicle"
-            className="input pl-9"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
+        {/* Search & Column toggle */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search by IGP No., Supplier or Vehicle"
+              className="input pl-9"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+
+          <div className="relative">
+            <button
+              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 bg-white border border-gray-200 rounded-md px-2.5 py-1.5"
+              onClick={() => setShowColumnMenu(!showColumnMenu)}
+            >
+              <Settings2 className="h-3.5 w-3.5" />
+              Columns
+            </button>
+            {showColumnMenu && (
+              <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-md shadow-lg z-20 text-xs">
+                <div className="p-2 space-y-1">
+                  {Object.entries(visibleColumns).map(([key, value]) => (
+                    <label key={key} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded">
+                      <input
+                        type="checkbox"
+                        checked={value}
+                        onChange={() => toggleColumn(key as keyof typeof visibleColumns)}
+                        className="rounded border-gray-300"
+                      />
+                      <span className="capitalize text-gray-600">
+                        {key === "igp_number" ? "IGP No." : key === "received_date" ? "Date" : key === "supplier_name" ? "Supplier" : key === "vehicle_number" ? "Vehicle" : key === "item_count" ? "Items" : "Status"}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="card overflow-hidden">
@@ -173,47 +216,65 @@ export default function GatePassPage() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  {[
-                    { label: "IGP No.", field: "igp_number" },
-                    { label: "Date", field: "received_date" },
-                    { label: "Supplier", field: "supplier_name" },
-                    { label: "Vehicle", field: "vehicle_number" },
-                    { label: "Items", field: "item_count" },
-                    { label: "Status", field: "status" },
-                  ].map((col) => (
-                    <th
-                      key={col.field}
-                      className="table-th cursor-pointer select-none hover:bg-gray-100"
-                      onClick={() => handleSort(col.field as SortField)}
-                    >
-                      <span className="inline-flex items-center">
-                        {col.label} {renderSortIcon(col.field as SortField)}
-                      </span>
+                  {visibleColumns.igp_number && (
+                    <th className="table-th cursor-pointer select-none hover:bg-gray-100" onClick={() => handleSort("igp_number")}>
+                      <span className="inline-flex items-center">IGP No. {renderSortIcon("igp_number")}</span>
                     </th>
-                  ))}
-                  <th className="table-th"></th>
+                  )}
+                  {visibleColumns.received_date && (
+                    <th className="table-th cursor-pointer select-none hover:bg-gray-100" onClick={() => handleSort("received_date")}>
+                      <span className="inline-flex items-center">Date {renderSortIcon("received_date")}</span>
+                    </th>
+                  )}
+                  {visibleColumns.supplier_name && (
+                    <th className="table-th cursor-pointer select-none hover:bg-gray-100" onClick={() => handleSort("supplier_name")}>
+                      <span className="inline-flex items-center">Supplier {renderSortIcon("supplier_name")}</span>
+                    </th>
+                  )}
+                  {visibleColumns.vehicle_number && (
+                    <th className="table-th cursor-pointer select-none hover:bg-gray-100" onClick={() => handleSort("vehicle_number")}>
+                      <span className="inline-flex items-center">Vehicle {renderSortIcon("vehicle_number")}</span>
+                    </th>
+                  )}
+                  {visibleColumns.item_count && (
+                    <th className="table-th cursor-pointer select-none hover:bg-gray-100" onClick={() => handleSort("item_count")}>
+                      <span className="inline-flex items-center">Items {renderSortIcon("item_count")}</span>
+                    </th>
+                  )}
+                  {visibleColumns.status && (
+                    <th className="table-th cursor-pointer select-none hover:bg-gray-100" onClick={() => handleSort("status")}>
+                      <span className="inline-flex items-center">Status {renderSortIcon("status")}</span>
+                    </th>
+                  )}
+                  <th className="table-th"></th> {/* View button column always visible */}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {filtered.map((r) => (
                   <tr key={r.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="table-td font-mono text-xs font-medium text-brand-600">
-                      {r.igp_number}
-                    </td>
-                    <td className="table-td">{formatDate(r.received_date)}</td>
-                    <td className="table-td">{r.supplier_name || "—"}</td>
-                    <td className="table-td font-mono text-xs">{r.vehicle_number}</td>
-                    <td className="table-td text-center">{r.item_count}</td>
+                    {visibleColumns.igp_number && (
+                      <td className="table-td font-mono text-xs font-medium text-brand-600">{r.igp_number}</td>
+                    )}
+                    {visibleColumns.received_date && (
+                      <td className="table-td">{formatDate(r.received_date)}</td>
+                    )}
+                    {visibleColumns.supplier_name && (
+                      <td className="table-td">{r.supplier_name || "—"}</td>
+                    )}
+                    {visibleColumns.vehicle_number && (
+                      <td className="table-td font-mono text-xs">{r.vehicle_number}</td>
+                    )}
+                    {visibleColumns.item_count && (
+                      <td className="table-td text-center">{r.item_count}</td>
+                    )}
+                    {visibleColumns.status && (
+                      <td className="table-td">
+                        <span className={cn("badge", STATUS_STYLE[r.status])}>{r.status}</span>
+                      </td>
+                    )}
                     <td className="table-td">
-                      <span className={cn("badge", STATUS_STYLE[r.status])}>
-                        {r.status}
-                      </span>
-                    </td>
-                    <td className="table-td">
-                      <Link
-                        href={`/gate-pass/${r.id}`}
-                        className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-brand-600 transition-colors"
-                      >
+                      <Link href={`/gate-pass/${r.id}`}
+                        className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-brand-600 transition-colors">
                         <Eye className="h-3.5 w-3.5" /> View
                       </Link>
                     </td>
