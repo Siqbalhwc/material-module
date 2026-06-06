@@ -23,6 +23,7 @@ type PendingReqItem = {
   product_code: string;
   uom: string;
   requested_qty: number;
+  bags_qty?: number | null;
 };
 
 type PendingReq = {
@@ -42,7 +43,6 @@ export default function MaterialStorePage() {
   const [sortField, setSortField] = useState<SortField>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
-  // Pending requisitions
   const [pendingReqs, setPendingReqs] = useState<PendingReq[]>([]);
   const [loadingReqs, setLoadingReqs] = useState(true);
   const [showReqModal, setShowReqModal] = useState(false);
@@ -83,7 +83,7 @@ export default function MaterialStorePage() {
   const fetchPendingReqs = async () => {
     const { data, error } = await supabase
       .from("requisitions")
-      .select(`id, req_number, required_date, requisition_items(id, product_id, requested_qty, products(code, name, uom))`)
+      .select(`id, req_number, required_date, requisition_items(id, product_id, requested_qty, bags_qty, products(code, name, uom))`)
       .eq("from_store", "material_store")
       .eq("to_store", "wip")
       .eq("status", "submitted")
@@ -101,6 +101,7 @@ export default function MaterialStorePage() {
           product_code: it.products?.code ?? "",
           uom: it.uom,
           requested_qty: it.requested_qty,
+          bags_qty: it.bags_qty,
         })),
       }));
       setPendingReqs(mapped);
@@ -115,7 +116,6 @@ export default function MaterialStorePage() {
     fetchPendingReqs();
   }, []);
 
-  // Stock table filtering/sorting
   const filteredStock = useMemo(() => {
     let list = [...stock];
     if (searchQuery.trim()) {
@@ -149,7 +149,6 @@ export default function MaterialStorePage() {
     return sortDir === "asc" ? <ArrowUp className="h-3 w-3 text-brand-600 ml-1" /> : <ArrowDown className="h-3 w-3 text-brand-600 ml-1" />;
   };
 
-  // Open issue modal
   const openIssueModal = (req: PendingReq) => {
     setSelectedReq(req);
     const initialQtys: Record<string, number> = {};
@@ -158,19 +157,16 @@ export default function MaterialStorePage() {
     setShowReqModal(true);
   };
 
-  // Handle issue
   const handleIssue = async () => {
     if (!selectedReq) return;
     setIssuing(true);
     try {
-      // Update requisition status to 'issued'
       const { error: reqErr } = await supabase
         .from("requisitions")
         .update({ status: "issued", issued_at: new Date().toISOString() })
         .eq("id", selectedReq.id);
       if (reqErr) throw reqErr;
 
-      // For each item, insert stock_ledger row with direction = -1 (outflow from material_store)
       const ledgerRows = selectedReq.items.map(it => ({
         product_id: it.product_id,
         store: "material_store" as StoreType,
@@ -185,7 +181,6 @@ export default function MaterialStorePage() {
       const { error: ledgerErr } = await supabase.from("stock_ledger").insert(ledgerRows);
       if (ledgerErr) throw ledgerErr;
 
-      // Update requisition_items with issued_qty
       for (const it of selectedReq.items) {
         const qty = issueQtys[it.id] ?? it.requested_qty;
         await supabase
@@ -194,7 +189,6 @@ export default function MaterialStorePage() {
           .eq("id", it.id);
       }
 
-      // Refresh data
       setShowReqModal(false);
       setSelectedReq(null);
       fetchStock();
@@ -228,7 +222,6 @@ export default function MaterialStorePage() {
         }
       />
       <main className="flex-1 p-6 space-y-4">
-        {/* Search and stock table */}
         <div className="relative max-w-sm">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
           <input
@@ -320,7 +313,8 @@ export default function MaterialStorePage() {
                           <tr>
                             <th className="text-left py-1">Product</th>
                             <th className="text-left">Code</th>
-                            <th className="text-right">Requested Qty</th>
+                            <th className="text-right">Bags</th>
+                            <th className="text-right">Qty (KG)</th>
                             <th className="text-left">UOM</th>
                           </tr>
                         </thead>
@@ -329,6 +323,7 @@ export default function MaterialStorePage() {
                             <tr key={it.id}>
                               <td className="py-1">{it.product_name}</td>
                               <td className="py-1 font-mono">{it.product_code}</td>
+                              <td className="py-1 text-right">{it.bags_qty != null ? it.bags_qty : "—"}</td>
                               <td className="py-1 text-right">{it.requested_qty}</td>
                               <td className="py-1 uppercase">{it.uom}</td>
                             </tr>
@@ -351,10 +346,7 @@ export default function MaterialStorePage() {
                 <h2 className="text-lg font-semibold text-gray-800">
                   Issue: {selectedReq.req_number}
                 </h2>
-                <button
-                  onClick={() => setSelectedReq(null)}
-                  className="p-1 text-gray-400 hover:text-gray-600"
-                >
+                <button onClick={() => setSelectedReq(null)} className="p-1 text-gray-400 hover:text-gray-600">
                   <X className="h-5 w-5" />
                 </button>
               </div>
@@ -370,6 +362,7 @@ export default function MaterialStorePage() {
                   <tr>
                     <th className="text-left py-1">Product</th>
                     <th className="text-left">Code</th>
+                    <th className="text-right">Bags</th>
                     <th className="text-right">Requested</th>
                     <th className="text-right">Available</th>
                     <th className="text-right">Issue Qty</th>
@@ -378,34 +371,25 @@ export default function MaterialStorePage() {
                 </thead>
                 <tbody className="divide-y">
                   {selectedReq.items.map((it) => {
-                    const stockItem = stock.find(
-                      (s) => s.product_id === it.product_id
-                    );
+                    const stockItem = stock.find((s) => s.product_id === it.product_id);
                     const available = stockItem ? stockItem.balance : 0;
                     const issueQty = issueQtys[it.id] ?? it.requested_qty;
                     const overIssue = issueQty > available;
 
                     return (
-                      <tr
-                        key={it.id}
-                        className={cn(overIssue && "bg-red-50")}
-                      >
+                      <tr key={it.id} className={cn(overIssue && "bg-red-50")}>
                         <td className="py-2">{it.product_name}</td>
                         <td className="py-2 font-mono text-xs">{it.product_code}</td>
+                        <td className="py-2 text-right">{it.bags_qty != null ? it.bags_qty : "—"}</td>
                         <td className="py-2 text-right">{it.requested_qty}</td>
-                        <td className="py-2 text-right font-medium">
-                          {available.toFixed(3)}
-                        </td>
+                        <td className="py-2 text-right font-medium">{available.toFixed(3)}</td>
                         <td className="py-2 text-right">
                           <input
                             type="number"
                             step="0.001"
                             min="0"
                             max={available}
-                            className={cn(
-                              "input w-20 text-right",
-                              overIssue && "border-red-400 bg-red-50"
-                            )}
+                            className={cn("input w-20 text-right", overIssue && "border-red-400 bg-red-50")}
                             value={issueQty}
                             onChange={(e) =>
                               setIssueQtys((prev) => ({
@@ -414,11 +398,7 @@ export default function MaterialStorePage() {
                               }))
                             }
                           />
-                          {overIssue && (
-                            <p className="text-xs text-red-600 mt-1">
-                              Exceeds available
-                            </p>
-                          )}
+                          {overIssue && <p className="text-xs text-red-600 mt-1">Exceeds available</p>}
                         </td>
                         <td className="py-2 uppercase">{it.uom}</td>
                       </tr>
@@ -428,34 +408,24 @@ export default function MaterialStorePage() {
               </table>
 
               {selectedReq.items.some((it) => {
-                const stockItem = stock.find(
-                  (s) => s.product_id === it.product_id
-                );
+                const stockItem = stock.find((s) => s.product_id === it.product_id);
                 const available = stockItem ? stockItem.balance : 0;
                 const issueQty = issueQtys[it.id] ?? it.requested_qty;
                 return issueQty > available;
               }) && (
                 <div className="bg-red-50 text-red-700 text-sm p-3 rounded-md border border-red-200">
-                  One or more items exceed the available stock. Please reduce the
-                  quantities before confirming.
+                  One or more items exceed the available stock. Please reduce the quantities before confirming.
                 </div>
               )}
 
               <div className="flex justify-end gap-2">
-                <button
-                  className="btn-secondary"
-                  onClick={() => setSelectedReq(null)}
-                >
-                  Cancel
-                </button>
+                <button className="btn-secondary" onClick={() => setSelectedReq(null)}>Cancel</button>
                 <button
                   className="btn-primary"
                   disabled={
                     issuing ||
                     selectedReq.items.some((it) => {
-                      const stockItem = stock.find(
-                        (s) => s.product_id === it.product_id
-                      );
+                      const stockItem = stock.find((s) => s.product_id === it.product_id);
                       const available = stockItem ? stockItem.balance : 0;
                       const issueQty = issueQtys[it.id] ?? it.requested_qty;
                       return issueQty > available || issueQty <= 0;

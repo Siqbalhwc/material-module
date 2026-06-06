@@ -23,6 +23,7 @@ type RequisitionDetail = {
     product_code: string;
     uom: string;
     requested_qty: number;
+    bags_qty: number | null;
     batch_number: string | null;
   }[];
 };
@@ -65,6 +66,7 @@ export default function RequisitionDetailPage() {
             product_code: it.products?.code ?? "",
             uom: it.uom,
             requested_qty: it.requested_qty,
+            bags_qty: it.bags_qty,
             batch_number: it.notes,
           })),
         });
@@ -153,7 +155,8 @@ export default function RequisitionDetailPage() {
                 <tr>
                   <th className="px-3 py-2 text-left">Product</th>
                   <th className="px-3 py-2 text-left">Code</th>
-                  <th className="px-3 py-2 text-right">Qty</th>
+                  <th className="px-3 py-2 text-right">Bags</th>
+                  <th className="px-3 py-2 text-right">Quantity (KG)</th>
                   <th className="px-3 py-2 text-left">UOM</th>
                   <th className="px-3 py-2 text-left">Batch</th>
                 </tr>
@@ -168,7 +171,10 @@ export default function RequisitionDetailPage() {
                       {it.product_code}
                     </td>
                     <td className="px-3 py-2 text-right">
-                      {it.requested_qty}
+                      {it.bags_qty != null ? it.bags_qty : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right font-medium">
+                      {it.requested_qty.toFixed(3)}
                     </td>
                     <td className="px-3 py-2 uppercase text-xs">{it.uom}</td>
                     <td className="px-3 py-2">

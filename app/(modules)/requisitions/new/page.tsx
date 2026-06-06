@@ -12,8 +12,8 @@ interface LineItem {
   category: string;
   uom: string;
   conversion_kg?: number;
-  bags: string;
-  requested_qty: string;   // final KG (or litres/units)
+  bags: string;              // user enters number of bags
+  requested_qty: string;     // final KG (or litres/units)
   batch_number: string;
 }
 
@@ -120,8 +120,9 @@ export default function NewRequisitionPage() {
       const lineItemsPayload = items.map((it) => ({
         requisition_id: req.id,
         product_id: it.product_id,
-        requested_qty: parseFloat(it.requested_qty),
+        requested_qty: parseFloat(it.requested_qty),   // KG
         uom: it.uom,
+        bags_qty: it.uom === "bags" && it.bags ? parseFloat(it.bags) : null,  // store bags count
         notes: it.batch_number || null,
       }));
 
@@ -206,7 +207,6 @@ export default function NewRequisitionPage() {
                     )}
                   </div>
 
-                  {/* Single row for main controls */}
                   <div className="grid grid-cols-12 gap-2 items-end">
                     {/* Category */}
                     <div className="col-span-2">
@@ -269,7 +269,6 @@ export default function NewRequisitionPage() {
                         value={item.requested_qty}
                         onChange={(e) => updateItem(i, "requested_qty", e.target.value)}
                       />
-                      {/* Conversion note (bag products only) – shown below the input */}
                       {item.uom === "bags" && item.conversion_kg && (
                         <p className="text-xs text-gray-400 mt-1">1 bag = {item.conversion_kg} kg</p>
                       )}
