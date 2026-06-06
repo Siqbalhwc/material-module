@@ -5,14 +5,14 @@ import Link from "next/link";
 import { Plus, FileText, Eye, Search, ArrowUpDown, ArrowUp, ArrowDown, Settings2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { formatDate, cn, REQ_STATUS_COLORS, STORE_LABELS } from "@/lib/utils";
-import type { StoreType } from "@/types";
+import type { StoreType, RequisitionStatus } from "@/types";
 
 type RequisitionWithMeta = {
   id: string;
   req_number: string;
   from_store: string;
   to_store: string;
-  status: string;
+  status: RequisitionStatus;   // ← typed correctly
   required_date: string | null;
   item_count: number;
   created_at: string;
@@ -49,12 +49,12 @@ export default function RequisitionsPage() {
     if (error) {
       console.error("Failed to fetch requisitions:", error);
     } else {
-      const mapped = (data || []).map((r: any) => ({
+      const mapped: RequisitionWithMeta[] = (data || []).map((r: any) => ({
         id: r.id,
         req_number: r.req_number,
         from_store: r.from_store,
         to_store: r.to_store,
-        status: r.status,
+        status: r.status as RequisitionStatus,   // cast once
         required_date: r.required_date,
         item_count: r.requisition_items?.[0]?.count ?? 0,
         created_at: r.created_at,
@@ -195,7 +195,7 @@ export default function RequisitionsPage() {
                     {visibleColumns.to_store && <td className="table-td text-xs">{STORE_LABELS[r.to_store as StoreType] || r.to_store}</td>}
                     {visibleColumns.item_count && <td className="table-td text-center">{r.item_count}</td>}
                     {visibleColumns.required_date && <td className="table-td">{r.required_date ? formatDate(r.required_date) : "—"}</td>}
-                    {visibleColumns.status && <td className="table-td"><span className={cn("badge", REQ_STATUS_COLORS[r.status as RequisitionStatus])}>{r.status}</span></td>}
+                    {visibleColumns.status && <td className="table-td"><span className={cn("badge", REQ_STATUS_COLORS[r.status])}>{r.status}</span></td>}
                     <td className="table-td">
                       <Link href={`/requisitions/${r.id}`} className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-brand-600 transition-colors">
                         <Eye className="h-3.5 w-3.5" /> View
