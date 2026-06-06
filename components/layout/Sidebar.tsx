@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  LayoutDashboard, Truck, FileText, Wrench,
+  LayoutDashboard, Truck, Warehouse, FileText, Wrench,
   RotateCcw, Package, Send, BarChart3, ShoppingBag,
   ChevronRight, Settings, Shield,
 } from "lucide-react";
@@ -14,6 +14,7 @@ import { useState, useEffect } from "react";
 const NAV = [
   { label: "Dashboard",        href: "/dashboard",                icon: LayoutDashboard },
   { label: "Gate Pass",        href: "/gate-pass",                icon: Truck },
+  { label: "Material Store",   href: "/material-store",           icon: Warehouse },
   { label: "Requisitions",     href: "/requisitions",             icon: FileText },
   { label: "WIP Batches",      href: "/wip",                      icon: Wrench },
   { label: "RC Store",         href: "/rc-store",                 icon: RotateCcw },
