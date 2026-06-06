@@ -1,7 +1,7 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Header from "@/components/layout/Header";
-import { Plus, ShoppingBag, RotateCcw, Settings2 } from "lucide-react";
+import { Plus, ShoppingBag, RotateCcw, Settings2, Search, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { Product } from "@/types";
@@ -13,6 +13,9 @@ const CATEGORIES = [
 ];
 
 const UOM_LIST = ["kg", "bags", "litres", "units", "metres", "pcs"];
+
+type SortField = "code" | "name" | "category" | "uom" | "conversion_kg" | "reorder_level" | "is_rc" | "is_active";
+type SortDir = "asc" | "desc";
 
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -35,11 +38,16 @@ export default function ProductsPage() {
     category: true,
     uom: true,
     kgPerBag: true,
-    reorder: false,    // hidden by default
-    rc: false,         // hidden by default
+    reorder: false,
+    rc: false,
     status: true,
   });
   const [showColumnMenu, setShowColumnMenu] = useState(false);
+
+  // Search & Sort
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortField, setSortField] = useState<SortField>("name");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
 
   const supabase = createClient();
 
@@ -107,6 +115,93 @@ export default function ProductsPage() {
 
   const toggleColumn = (key: keyof typeof visibleColumns) => {
     setVisibleColumns((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  // Filter + Sort
+  const filteredProducts = useMemo(() => {
+    let list = [...products];
+
+    // Search filter
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          p.code.toLowerCase().includes(q)
+      );
+    }
+
+    // Sort
+    list.sort((a, b) => {
+      let valA: any, valB: any;
+
+      switch (sortField) {
+        case "code":
+          valA = a.code;
+          valB = b.code;
+          break;
+        case "name":
+          valA = a.name;
+          valB = b.name;
+          break;
+        case "category":
+          valA = a.category;
+          valB = b.category;
+          break;
+        case "uom":
+          valA = a.uom;
+          valB = b.uom;
+          break;
+        case "conversion_kg":
+          valA = a.conversion_kg ?? 0;
+          valB = b.conversion_kg ?? 0;
+          break;
+        case "reorder_level":
+          valA = a.reorder_level;
+          valB = b.reorder_level;
+          break;
+        case "is_rc":
+          valA = a.is_rc ? 1 : 0;
+          valB = b.is_rc ? 1 : 0;
+          break;
+        case "is_active":
+          valA = a.is_active ? 1 : 0;
+          valB = b.is_active ? 1 : 0;
+          break;
+        default:
+          return 0;
+      }
+
+      if (typeof valA === "string") {
+        return sortDir === "asc"
+          ? valA.localeCompare(valB)
+          : valB.localeCompare(valA);
+      } else {
+        return sortDir === "asc" ? valA - valB : valB - valA;
+      }
+    });
+
+    return list;
+  }, [products, searchQuery, sortField, sortDir]);
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDir("asc");
+    }
+  };
+
+  const renderSortIcon = (field: SortField) => {
+    if (sortField !== field) {
+      return <ArrowUpDown className="h-3 w-3 text-gray-300 ml-1" />;
+    }
+    return sortDir === "asc" ? (
+      <ArrowUp className="h-3 w-3 text-brand-600 ml-1" />
+    ) : (
+      <ArrowDown className="h-3 w-3 text-brand-600 ml-1" />
+    );
   };
 
   return (
@@ -222,8 +317,19 @@ export default function ProductsPage() {
           </div>
         )}
 
-        {/* Column visibility toggle */}
-        <div className="flex justify-end">
+        {/* Search & Column toggle */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search by name or code..."
+              className="input pl-9"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+
           <div className="relative">
             <button
               className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 bg-white border border-gray-200 rounded-md px-2.5 py-1.5"
@@ -259,27 +365,101 @@ export default function ProductsPage() {
             <div className="flex items-center justify-center py-16 text-gray-400">
               Loading…
             </div>
-          ) : products.length === 0 ? (
+          ) : filteredProducts.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-gray-400">
               <ShoppingBag className="h-10 w-10 mb-3 opacity-30" />
-              <p className="text-sm">No products yet</p>
+              <p className="text-sm">
+                {searchQuery ? "No products match your search" : "No products yet"}
+              </p>
             </div>
           ) : (
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  {visibleColumns.code && <th className="table-th">Code</th>}
-                  {visibleColumns.name && <th className="table-th">Name</th>}
-                  {visibleColumns.category && <th className="table-th">Category</th>}
-                  {visibleColumns.uom && <th className="table-th">UOM</th>}
-                  {visibleColumns.kgPerBag && <th className="table-th">Kg/Bag</th>}
-                  {visibleColumns.reorder && <th className="table-th">Reorder Level</th>}
-                  {visibleColumns.rc && <th className="table-th">RC</th>}
-                  {visibleColumns.status && <th className="table-th">Status</th>}
+                  {visibleColumns.code && (
+                    <th
+                      className="table-th cursor-pointer select-none hover:bg-gray-100"
+                      onClick={() => handleSort("code")}
+                    >
+                      <span className="inline-flex items-center">
+                        Code {renderSortIcon("code")}
+                      </span>
+                    </th>
+                  )}
+                  {visibleColumns.name && (
+                    <th
+                      className="table-th cursor-pointer select-none hover:bg-gray-100"
+                      onClick={() => handleSort("name")}
+                    >
+                      <span className="inline-flex items-center">
+                        Name {renderSortIcon("name")}
+                      </span>
+                    </th>
+                  )}
+                  {visibleColumns.category && (
+                    <th
+                      className="table-th cursor-pointer select-none hover:bg-gray-100"
+                      onClick={() => handleSort("category")}
+                    >
+                      <span className="inline-flex items-center">
+                        Category {renderSortIcon("category")}
+                      </span>
+                    </th>
+                  )}
+                  {visibleColumns.uom && (
+                    <th
+                      className="table-th cursor-pointer select-none hover:bg-gray-100"
+                      onClick={() => handleSort("uom")}
+                    >
+                      <span className="inline-flex items-center">
+                        UOM {renderSortIcon("uom")}
+                      </span>
+                    </th>
+                  )}
+                  {visibleColumns.kgPerBag && (
+                    <th
+                      className="table-th cursor-pointer select-none hover:bg-gray-100"
+                      onClick={() => handleSort("conversion_kg")}
+                    >
+                      <span className="inline-flex items-center">
+                        Kg/Bag {renderSortIcon("conversion_kg")}
+                      </span>
+                    </th>
+                  )}
+                  {visibleColumns.reorder && (
+                    <th
+                      className="table-th cursor-pointer select-none hover:bg-gray-100"
+                      onClick={() => handleSort("reorder_level")}
+                    >
+                      <span className="inline-flex items-center">
+                        Reorder Level {renderSortIcon("reorder_level")}
+                      </span>
+                    </th>
+                  )}
+                  {visibleColumns.rc && (
+                    <th
+                      className="table-th cursor-pointer select-none hover:bg-gray-100"
+                      onClick={() => handleSort("is_rc")}
+                    >
+                      <span className="inline-flex items-center">
+                        RC {renderSortIcon("is_rc")}
+                      </span>
+                    </th>
+                  )}
+                  {visibleColumns.status && (
+                    <th
+                      className="table-th cursor-pointer select-none hover:bg-gray-100"
+                      onClick={() => handleSort("is_active")}
+                    >
+                      <span className="inline-flex items-center">
+                        Status {renderSortIcon("is_active")}
+                      </span>
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {products.map((p) => (
+                {filteredProducts.map((p) => (
                   <tr key={p.id} className="hover:bg-gray-50 transition-colors">
                     {visibleColumns.code && (
                       <td className="table-td font-mono text-xs font-medium text-brand-600">{p.code}</td>
