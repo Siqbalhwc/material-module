@@ -11,9 +11,9 @@ interface LineItem {
   product_id: string;
   category: string;
   uom: string;
-  conversion_kg?: number;   // from product
-  bags: string;             // user enters number of bags (only for bags UOM)
-  requested_qty: string;    // final quantity in KG (or litres/units)
+  conversion_kg?: number;
+  bags: string;
+  requested_qty: string;   // final KG (or litres/units)
   batch_number: string;
 }
 
@@ -51,7 +51,6 @@ export default function NewRequisitionPage() {
         if (idx !== i) return it;
         const updated = { ...it, [field]: val };
 
-        // When product changes, fill details
         if (field === "product_id") {
           const prod = products.find((p) => p.id === val);
           if (prod) {
@@ -67,7 +66,6 @@ export default function NewRequisitionPage() {
           }
         }
 
-        // When bags change, auto-calculate total KG
         if (field === "bags" && updated.uom === "bags" && updated.conversion_kg) {
           const bags = parseFloat(val);
           if (!isNaN(bags)) {
@@ -77,7 +75,6 @@ export default function NewRequisitionPage() {
           }
         }
 
-        // If category changed, reset product
         if (field === "category") {
           updated.product_id = "";
           updated.uom = "kg";
@@ -123,7 +120,7 @@ export default function NewRequisitionPage() {
       const lineItemsPayload = items.map((it) => ({
         requisition_id: req.id,
         product_id: it.product_id,
-        requested_qty: parseFloat(it.requested_qty),   // stored as KG/litres/units
+        requested_qty: parseFloat(it.requested_qty),
         uom: it.uom,
         notes: it.batch_number || null,
       }));
@@ -208,8 +205,11 @@ export default function NewRequisitionPage() {
                       </button>
                     )}
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end">
-                    <div className="md:col-span-2">
+
+                  {/* Single row for main controls */}
+                  <div className="grid grid-cols-12 gap-2 items-end">
+                    {/* Category */}
+                    <div className="col-span-2">
                       <label className="label">Category *</label>
                       <select
                         className="input"
@@ -222,7 +222,9 @@ export default function NewRequisitionPage() {
                         <option value="Store / Consumable">Store / Consumable</option>
                       </select>
                     </div>
-                    <div className="md:col-span-3">
+
+                    {/* Product */}
+                    <div className="col-span-3">
                       <label className="label">Product *</label>
                       <select
                         className="input"
@@ -237,9 +239,9 @@ export default function NewRequisitionPage() {
                       </select>
                     </div>
 
-                    {/* Bags field if UOM = bags */}
+                    {/* Bags (only for bag products) */}
                     {item.uom === "bags" && (
-                      <div className="md:col-span-1">
+                      <div className="col-span-1">
                         <label className="label">Bags</label>
                         <input
                           type="number"
@@ -252,8 +254,8 @@ export default function NewRequisitionPage() {
                       </div>
                     )}
 
-                    {/* Quantity (KG/litres/units) */}
-                    <div className={item.uom === "bags" ? "md:col-span-2" : "md:col-span-2"}>
+                    {/* Total KG / Quantity */}
+                    <div className={item.uom === "bags" ? "col-span-2" : "col-span-3"}>
                       <label className="label">
                         {item.uom === "bags" ? "Total KG" : item.uom === "kg" ? "KG" : item.uom}
                       </label>
@@ -267,16 +269,20 @@ export default function NewRequisitionPage() {
                         value={item.requested_qty}
                         onChange={(e) => updateItem(i, "requested_qty", e.target.value)}
                       />
+                      {/* Conversion note (bag products only) – shown below the input */}
                       {item.uom === "bags" && item.conversion_kg && (
                         <p className="text-xs text-gray-400 mt-1">1 bag = {item.conversion_kg} kg</p>
                       )}
                     </div>
 
-                    <div className="md:col-span-2">
+                    {/* UOM (read-only) */}
+                    <div className="col-span-2">
                       <label className="label">UOM</label>
                       <input className="input bg-gray-50" readOnly value={item.uom} />
                     </div>
-                    <div className="md:col-span-2">
+
+                    {/* Batch No. */}
+                    <div className="col-span-2">
                       <label className="label">Batch No.</label>
                       <input className="input" placeholder="Optional" value={item.batch_number}
                         onChange={(e) => updateItem(i, "batch_number", e.target.value)} />
