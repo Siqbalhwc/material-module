@@ -9,9 +9,11 @@ import type { Product } from "@/types";
 
 interface LineItem {
   product_id: string;
-  category: string;   // per‑item category
+  category: string;
   uom: string;
-  requested_qty: string;
+  conversion_kg?: number;   // from product
+  bags: string;             // user enters number of bags (only for bags UOM)
+  requested_qty: string;    // final quantity in KG (or litres/units)
   batch_number: string;
 }
 
@@ -30,7 +32,7 @@ export default function NewRequisitionPage() {
   });
 
   const [items, setItems] = useState<LineItem[]>([
-    { product_id: "", category: "", uom: "kg", requested_qty: "", batch_number: "" },
+    { product_id: "", category: "", uom: "kg", bags: "", requested_qty: "", batch_number: "" },
   ]);
 
   useEffect(() => {
@@ -38,7 +40,7 @@ export default function NewRequisitionPage() {
   }, []);
 
   const addItem = () =>
-    setItems((prev) => [...prev, { product_id: "", category: "", uom: "kg", requested_qty: "", batch_number: "" }]);
+    setItems((prev) => [...prev, { product_id: "", category: "", uom: "kg", bags: "", requested_qty: "", batch_number: "" }]);
 
   const removeItem = (i: number) =>
     setItems((prev) => prev.filter((_, idx) => idx !== i));
@@ -48,19 +50,42 @@ export default function NewRequisitionPage() {
       prev.map((it, idx) => {
         if (idx !== i) return it;
         const updated = { ...it, [field]: val };
+
+        // When product changes, fill details
         if (field === "product_id") {
           const prod = products.find((p) => p.id === val);
           if (prod) {
             updated.uom = prod.uom;
+            updated.conversion_kg = prod.conversion_kg ?? undefined;
             updated.category = prod.category;
+            updated.bags = "";
+            updated.requested_qty = "";
           } else {
             updated.uom = "kg";
+            updated.conversion_kg = undefined;
             updated.category = "";
           }
         }
+
+        // When bags change, auto-calculate total KG
+        if (field === "bags" && updated.uom === "bags" && updated.conversion_kg) {
+          const bags = parseFloat(val);
+          if (!isNaN(bags)) {
+            updated.requested_qty = (bags * updated.conversion_kg).toFixed(3);
+          } else {
+            updated.requested_qty = "";
+          }
+        }
+
+        // If category changed, reset product
         if (field === "category") {
           updated.product_id = "";
+          updated.uom = "kg";
+          updated.conversion_kg = undefined;
+          updated.bags = "";
+          updated.requested_qty = "";
         }
+
         return updated;
       })
     );
@@ -98,9 +123,9 @@ export default function NewRequisitionPage() {
       const lineItemsPayload = items.map((it) => ({
         requisition_id: req.id,
         product_id: it.product_id,
-        requested_qty: parseFloat(it.requested_qty),
+        requested_qty: parseFloat(it.requested_qty),   // stored as KG/litres/units
         uom: it.uom,
-        notes: it.batch_number || null, // using notes field for batch
+        notes: it.batch_number || null,
       }));
 
       const { error: lineErr } = await supabase.from("requisition_items").insert(lineItemsPayload);
@@ -211,15 +236,42 @@ export default function NewRequisitionPage() {
                         ))}
                       </select>
                     </div>
-                    <div className="md:col-span-2">
-                      <label className="label">Quantity</label>
+
+                    {/* Bags field if UOM = bags */}
+                    {item.uom === "bags" && (
+                      <div className="md:col-span-1">
+                        <label className="label">Bags</label>
+                        <input
+                          type="number"
+                          min="0"
+                          className="input"
+                          placeholder="0"
+                          value={item.bags}
+                          onChange={(e) => updateItem(i, "bags", e.target.value)}
+                        />
+                      </div>
+                    )}
+
+                    {/* Quantity (KG/litres/units) */}
+                    <div className={item.uom === "bags" ? "md:col-span-2" : "md:col-span-2"}>
+                      <label className="label">
+                        {item.uom === "bags" ? "Total KG" : item.uom === "kg" ? "KG" : item.uom}
+                      </label>
                       <input
-                        type="number" step="0.001" min="0" className="input" required
+                        type="number"
+                        step="0.001"
+                        min="0"
+                        className="input"
+                        required
                         placeholder="0.00"
                         value={item.requested_qty}
                         onChange={(e) => updateItem(i, "requested_qty", e.target.value)}
                       />
+                      {item.uom === "bags" && item.conversion_kg && (
+                        <p className="text-xs text-gray-400 mt-1">1 bag = {item.conversion_kg} kg</p>
+                      )}
                     </div>
+
                     <div className="md:col-span-2">
                       <label className="label">UOM</label>
                       <input className="input bg-gray-50" readOnly value={item.uom} />
