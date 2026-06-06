@@ -17,7 +17,7 @@ type RequisitionWithMeta = {
   created_at: string;
 };
 
-type SortField = "req_number" | "from_store" | "to_store" | "item_count" | "required_date" | "status";
+type SortField = "req_number" | "from_store" | "to_store" | "item_count" | "required_date" | "status" | "created_at";
 type SortDir = "asc" | "desc";
 
 export default function RequisitionsPage() {
