@@ -28,8 +28,10 @@ export interface Product {
   uom: UOM;
   is_rc: boolean;
   reorder_level: number;
+  conversion_kg?: number;      // ← NEW
   is_active: boolean;
   created_at: string;
+  updated_at?: string;         // ← NEW
 }
 
 export interface Supplier {
