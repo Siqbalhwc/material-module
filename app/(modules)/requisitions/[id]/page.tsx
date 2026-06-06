@@ -6,6 +6,7 @@ import Link from "next/link";
 import { ArrowLeft, FileText } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { formatDate, cn, REQ_STATUS_COLORS, STORE_LABELS } from "@/lib/utils";
+import type { StoreType } from "@/types";
 
 type RequisitionDetail = {
   id: string;
@@ -91,7 +92,7 @@ export default function RequisitionDetailPage() {
     <>
       <Header
         title={`Requisition: ${req.req_number}`}
-        subtitle={`${STORE_LABELS[req.from_store] || req.from_store} → ${STORE_LABELS[req.to_store] || req.to_store}`}
+        subtitle={`${STORE_LABELS[req.from_store as StoreType] || req.from_store} → ${STORE_LABELS[req.to_store as StoreType] || req.to_store}`}
         actions={
           <Link href="/requisitions" className="btn-secondary inline-flex items-center gap-1">
             <ArrowLeft className="h-4 w-4" /> Back
