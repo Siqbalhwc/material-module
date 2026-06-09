@@ -45,6 +45,12 @@ type PendingReceipt = {
   }[];
 };
 
+type FGProductOption = {
+  id: string;
+  name: string;
+  code: string;
+};
+
 const BATCH_STATUS_STYLE: Record<string, string> = {
   planned: "bg-gray-100 text-gray-600",
   in_progress: "bg-amber-100 text-amber-700",
@@ -75,10 +81,17 @@ export default function WIPPage() {
   const [loadingReceipts, setLoadingReceipts] = useState(true);
   const [verifying, setVerifying] = useState<string | null>(null);
 
-  // RC transfer modal
+  // Transfer modal state
   const [transferItem, setTransferItem] = useState<WIPStock | null>(null);
+  const [transferTarget, setTransferTarget] = useState<"rc" | "fg">("rc");
   const [transferQty, setTransferQty] = useState("");
   const [transferring, setTransferring] = useState(false);
+
+  // FG product selection / creation
+  const [fgProducts, setFgProducts] = useState<FGProductOption[]>([]);
+  const [selectedFGProduct, setSelectedFGProduct] = useState("");
+  const [newFGName, setNewFGName] = useState("");
+  const [newFGWeight, setNewFGWeight] = useState("");
 
   // ── Fetch WIP stock ─────────────────────────────────────────
   const fetchStock = async () => {
@@ -144,10 +157,22 @@ export default function WIPPage() {
     setLoadingReceipts(false);
   };
 
+  // ── Fetch FG products (category = 'Finished Good') ─────────
+  const fetchFGProducts = async () => {
+    const { data } = await supabase
+      .from("products")
+      .select("id, name, code")
+      .eq("category", "Finished Good")
+      .eq("is_active", true)
+      .order("name");
+    if (data) setFgProducts(data as FGProductOption[]);
+  };
+
   useEffect(() => {
     fetchStock();
     fetchBatches();
     fetchReceipts();
+    fetchFGProducts();
   }, []);
 
   // ── Stock filtering & sorting ──────────────────────────────
@@ -267,63 +292,142 @@ export default function WIPPage() {
     }
   };
 
-  // ── RC Transfer handler ────────────────────────────────────
-  const handleSendToRC = async () => {
+  // ── Transfer handler (RC or FG) ────────────────────────────
+  const handleTransfer = async () => {
     if (!transferItem) return;
     const qty = parseFloat(transferQty);
     if (isNaN(qty) || qty <= 0 || qty > transferItem.balance) {
       alert("Please enter a valid quantity (up to available balance).");
       return;
     }
+
+    if (transferTarget === "fg") {
+      // Validate FG product selection or new product input
+      if (!selectedFGProduct && !newFGName) {
+        alert("Please select or create a finished good product.");
+        return;
+      }
+    }
+
     setTransferring(true);
     try {
-      // 1. Insert rc_movements record
-      const { data: movement, error: moveErr } = await supabase
-        .from("rc_movements")
-        .insert({
-          product_id: transferItem.product_id,
-          direction: "return_from_wip",
-          quantity: qty,
-          uom: transferItem.uom,
-          reason: `Sent from WIP`,
-        })
-        .select()
-        .single();
-      if (moveErr) throw moveErr;
+      if (transferTarget === "rc") {
+        // RC Transfer (existing logic)
+        const { data: movement, error: moveErr } = await supabase
+          .from("rc_movements")
+          .insert({
+            product_id: transferItem.product_id,
+            direction: "return_from_wip",
+            quantity: qty,
+            uom: transferItem.uom,
+            reason: `Sent from WIP`,
+          })
+          .select()
+          .single();
+        if (moveErr) throw moveErr;
 
-      // 2. Stock ledger entries
-      const ledgerRows = [
-        {
-          product_id: transferItem.product_id,
-          store: "wip" as StoreType,
-          txn_type: "issued",
-          quantity: qty,
-          direction: -1,
-          reference_type: "rc_movement",
-          reference_id: movement.id,
-          notes: `Sent to RC Store – Ref ${movement.ref_number}`,
-        },
-        {
-          product_id: transferItem.product_id,
-          store: "rc_store" as StoreType,
-          txn_type: "received",
-          quantity: qty,
-          direction: 1,
-          reference_type: "rc_movement",
-          reference_id: movement.id,
-          notes: `Received from WIP – Ref ${movement.ref_number}`,
-        },
-      ];
-      const { error: ledgerErr } = await supabase.from("stock_ledger").insert(ledgerRows);
-      if (ledgerErr) throw ledgerErr;
+        const ledgerRows = [
+          {
+            product_id: transferItem.product_id,
+            store: "wip" as StoreType,
+            txn_type: "issued",
+            quantity: qty,
+            direction: -1,
+            reference_type: "rc_movement",
+            reference_id: movement.id,
+            notes: `Sent to RC Store – Ref ${movement.ref_number}`,
+          },
+          {
+            product_id: transferItem.product_id,
+            store: "rc_store" as StoreType,
+            txn_type: "received",
+            quantity: qty,
+            direction: 1,
+            reference_type: "rc_movement",
+            reference_id: movement.id,
+            notes: `Received from WIP – Ref ${movement.ref_number}`,
+          },
+        ];
+        const { error: ledgerErr } = await supabase.from("stock_ledger").insert(ledgerRows);
+        if (ledgerErr) throw ledgerErr;
 
-      // 3. Refresh stock
+      } else {
+        // Finished Goods transfer
+        let fgProductId = selectedFGProduct;
+
+        if (!fgProductId && newFGName) {
+          // Create new finished good product
+          const { data: newProd, error: prodErr } = await supabase
+            .from("products")
+            .insert({
+              name: newFGName,
+              category: "Finished Good",
+              uom: "kg",
+              is_rc: false,
+              reorder_level: 0,
+              // code will be auto-generated if trigger exists, else we can manually set a code
+            })
+            .select()
+            .single();
+          if (prodErr) throw prodErr;
+          fgProductId = newProd.id;
+          // Update FG products list
+          setFgProducts(prev => [...prev, { id: newProd.id, name: newProd.name, code: newProd.code }]);
+        }
+
+        if (!fgProductId) throw new Error("No finished good product selected.");
+
+        // Insert fg_transfers record
+        const { data: fgTransfer, error: fgErr } = await supabase
+          .from("fg_transfers")
+          .insert({
+            product_id: fgProductId,
+            quantity: parseFloat(newFGWeight) || qty, // weight of finished good
+            uom: "kg",
+            qc_passed: true,
+            transferred_at: new Date().toISOString(),
+          })
+          .select()
+          .single();
+        if (fgErr) throw fgErr;
+
+        // Stock ledger: deduct from WIP
+        const ledgerRows = [
+          {
+            product_id: transferItem.product_id,
+            store: "wip" as StoreType,
+            txn_type: "issued",
+            quantity: qty,
+            direction: -1,
+            reference_type: "fg_transfer",
+            reference_id: fgTransfer.id,
+            notes: `Transferred to Finished Goods – Ref ${fgTransfer.ref_number}`,
+          },
+          {
+            product_id: fgProductId,
+            store: "finished_goods" as StoreType,
+            txn_type: "received",
+            quantity: parseFloat(newFGWeight) || qty,
+            direction: 1,
+            reference_type: "fg_transfer",
+            reference_id: fgTransfer.id,
+            notes: `Received from WIP – Ref ${fgTransfer.ref_number}`,
+          },
+        ];
+        const { error: ledgerErr } = await supabase.from("stock_ledger").insert(ledgerRows);
+        if (ledgerErr) throw ledgerErr;
+      }
+
+      // Refresh stock and reset modal
       fetchStock();
       setTransferItem(null);
       setTransferQty("");
+      setNewFGName("");
+      setNewFGWeight("");
+      setSelectedFGProduct("");
     } catch (err: any) {
-      console.error("RC transfer failed:", err);
-      alert("Failed to transfer: " + (err.message || "Unknown error"));
+      console.error("Transfer failed:", err);
+      alert("Transfer failed: " + (err.message || "Unknown error"));
     } finally {
       setTransferring(false);
     }
@@ -333,7 +437,7 @@ export default function WIPPage() {
     <>
       <Header
         title="WIP – Production Management"
-        subtitle="Verify incoming materials and manage batches"
+        subtitle="Verify incoming materials, manage stock, and transfer to RC or Finished Goods"
         actions={
           <Link href="/wip/new" className="btn-primary">
             <Plus className="h-4 w-4" /> New Batch
@@ -474,10 +578,10 @@ export default function WIPPage() {
                         </td>
                         <td className="table-td">
                           <button
-                            className="text-xs text-purple-600 hover:text-purple-700 inline-flex items-center gap-1"
-                            onClick={() => { setTransferItem(item); setTransferQty(""); }}
+                            className="text-xs text-brand-600 hover:text-brand-700 inline-flex items-center gap-1"
+                            onClick={() => { setTransferItem(item); setTransferQty(""); setTransferTarget("rc"); setNewFGName(""); setNewFGWeight(""); setSelectedFGProduct(""); }}
                           >
-                            <Send className="h-3 w-3" /> Send to RC
+                            <Send className="h-3 w-3" /> Transfer Out
                           </button>
                         </td>
                       </tr>
@@ -545,18 +649,20 @@ export default function WIPPage() {
           </div>
         </section>
 
-        {/* ── RC Transfer Modal ──────────────────────────────── */}
+        {/* ── Transfer Out Modal ──────────────────────────────── */}
         {transferItem && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 space-y-4">
               <h2 className="text-lg font-semibold text-gray-800">
-                Send to RC Store: {transferItem.name}
+                Transfer: {transferItem.name}
               </h2>
               <p className="text-sm text-gray-500">
                 Available: {transferItem.balance.toFixed(3)} {transferItem.uom}
               </p>
+
+              {/* Quantity to transfer */}
               <div>
-                <label className="label">Quantity to send ({transferItem.uom})</label>
+                <label className="label">Quantity to transfer ({transferItem.uom})</label>
                 <input
                   type="number"
                   step="0.001"
@@ -567,10 +673,77 @@ export default function WIPPage() {
                   onChange={(e) => setTransferQty(e.target.value)}
                 />
               </div>
+
+              {/* Destination */}
+              <div>
+                <label className="label">Destination</label>
+                <div className="flex gap-4 mt-1">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="transferTarget"
+                      value="rc"
+                      checked={transferTarget === "rc"}
+                      onChange={() => setTransferTarget("rc")}
+                    />
+                    <span className="text-sm">RC Store</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="transferTarget"
+                      value="fg"
+                      checked={transferTarget === "fg"}
+                      onChange={() => setTransferTarget("fg")}
+                    />
+                    <span className="text-sm">Finished Goods</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Finished Goods options */}
+              {transferTarget === "fg" && (
+                <div className="space-y-3 border-t pt-3">
+                  <p className="text-sm font-medium text-gray-700">Select Finished Good</p>
+                  <select
+                    className="input"
+                    value={selectedFGProduct}
+                    onChange={(e) => { setSelectedFGProduct(e.target.value); setNewFGName(""); }}
+                  >
+                    <option value="">-- Choose existing --</option>
+                    {fgProducts.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name} ({p.code})</option>
+                    ))}
+                  </select>
+
+                  <p className="text-sm text-gray-500">Or create a new finished good:</p>
+                  <input
+                    className="input"
+                    placeholder="New finished good name"
+                    value={newFGName}
+                    onChange={(e) => { setNewFGName(e.target.value); setSelectedFGProduct(""); }}
+                  />
+
+                  <div>
+                    <label className="label">Finished Good Weight (kg)</label>
+                    <input
+                      type="number"
+                      step="0.001"
+                      min="0"
+                      className="input"
+                      placeholder="e.g., 500"
+                      value={newFGWeight}
+                      onChange={(e) => setNewFGWeight(e.target.value)}
+                    />
+                    <p className="text-xs text-gray-400 mt-1">Weight of the finished good produced (if different from consumed qty)</p>
+                  </div>
+                </div>
+              )}
+
               <div className="flex justify-end gap-2">
                 <button className="btn-secondary" onClick={() => setTransferItem(null)}>Cancel</button>
-                <button className="btn-primary" disabled={transferring} onClick={handleSendToRC}>
-                  {transferring ? "Sending..." : "Confirm Transfer"}
+                <button className="btn-primary" disabled={transferring} onClick={handleTransfer}>
+                  {transferring ? "Processing…" : "Confirm Transfer"}
                 </button>
               </div>
             </div>
