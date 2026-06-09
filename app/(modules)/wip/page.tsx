@@ -14,6 +14,7 @@ type WIPStock = {
   name: string;
   category: string;
   uom: string;
+  conversion_kg?: number;
   balance: number;
 };
 
@@ -78,7 +79,7 @@ export default function WIPPage() {
   const fetchStock = async () => {
     const { data, error } = await supabase
       .from("stock_balance")
-      .select(`product_id, balance, products ( code, name, category, uom )`)
+      .select(`product_id, balance, products ( code, name, category, uom, conversion_kg )`)
       .eq("store", "wip");
 
     if (!error && data) {
@@ -88,6 +89,7 @@ export default function WIPPage() {
         name: row.products?.name ?? "Unknown",
         category: row.products?.category ?? "",
         uom: row.products?.uom ?? "",
+        conversion_kg: row.products?.conversion_kg,
         balance: row.balance ?? 0,
       }));
       setStock(mapped);
@@ -205,9 +207,8 @@ export default function WIPPage() {
       const { error: ledgerErr } = await supabase.from("stock_ledger").insert(ledgerRows);
       if (ledgerErr) throw ledgerErr;
 
-      // Refresh data
       setReceipts((prev) => prev.filter((r) => r.id !== reqId));
-      fetchStock(); // re-fetch stock so it appears immediately
+      fetchStock();
     } catch (err: any) {
       console.error("Verification failed:", err);
       alert("Failed to verify: " + (err.message || "Unknown error"));
@@ -256,8 +257,8 @@ export default function WIPPage() {
       }
 
       setReceipts((prev) => prev.filter((r) => r.id !== reqId));
-      fetchStock(); // refresh stock (Material Store page will reflect the return)
-      alert("Rejected. Stock returned to Material Store.");
+      fetchStock();
+      alert("Rejected. Stock returned to Material Store. Requisition is now open for adjustment.");
     } catch (err: any) {
       console.error("Rejection failed:", err);
       alert("Failed to reject: " + (err.message || "Unknown error"));
@@ -384,30 +385,42 @@ export default function WIPPage() {
               <table className="w-full">
                 <thead className="bg-gray-50 border-b border-gray-100">
                   <tr>
-                    {(["code", "name", "category", "uom", "balance"] as SortField[]).map((field) => (
-                      <th
-                        key={field}
-                        className="table-th cursor-pointer select-none hover:bg-gray-100"
-                        onClick={() => handleSort(field)}
-                      >
-                        <span className="inline-flex items-center">
-                          {field.charAt(0).toUpperCase() + field.slice(1)}
-                          {renderSortIcon(field)}
-                        </span>
-                      </th>
-                    ))}
+                    <th className="table-th cursor-pointer select-none hover:bg-gray-100" onClick={() => handleSort("code")}>
+                      <span className="inline-flex items-center">Code {renderSortIcon("code")}</span>
+                    </th>
+                    <th className="table-th cursor-pointer select-none hover:bg-gray-100" onClick={() => handleSort("name")}>
+                      <span className="inline-flex items-center">Name {renderSortIcon("name")}</span>
+                    </th>
+                    <th className="table-th cursor-pointer select-none hover:bg-gray-100" onClick={() => handleSort("category")}>
+                      <span className="inline-flex items-center">Category {renderSortIcon("category")}</span>
+                    </th>
+                    <th className="table-th cursor-pointer select-none hover:bg-gray-100" onClick={() => handleSort("uom")}>
+                      <span className="inline-flex items-center">UOM {renderSortIcon("uom")}</span>
+                    </th>
+                    <th className="table-th text-right">Balance (UOM)</th>
+                    <th className="table-th text-right">Balance (KG)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {filteredStock.map((item) => (
-                    <tr key={item.product_id} className="hover:bg-gray-50 transition-colors">
-                      <td className="table-td font-mono text-xs font-medium text-brand-600">{item.code}</td>
-                      <td className="table-td font-medium text-gray-900">{item.name}</td>
-                      <td className="table-td text-gray-500">{item.category}</td>
-                      <td className="table-td text-xs uppercase text-gray-500">{item.uom}</td>
-                      <td className="table-td font-medium">{item.balance.toFixed(3)}</td>
-                    </tr>
-                  ))}
+                  {filteredStock.map((item) => {
+                    // Compute KG equivalent if bag product with conversion
+                    const kgEquivalent =
+                      item.uom === "bags" && item.conversion_kg
+                        ? item.balance * item.conversion_kg
+                        : undefined;
+                    return (
+                      <tr key={item.product_id} className="hover:bg-gray-50 transition-colors">
+                        <td className="table-td font-mono text-xs font-medium text-brand-600">{item.code}</td>
+                        <td className="table-td font-medium text-gray-900">{item.name}</td>
+                        <td className="table-td text-gray-500">{item.category}</td>
+                        <td className="table-td text-xs uppercase text-gray-500">{item.uom}</td>
+                        <td className="table-td text-right font-medium">{item.balance.toFixed(3)}</td>
+                        <td className="table-td text-right">
+                          {kgEquivalent != null ? kgEquivalent.toFixed(3) : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
