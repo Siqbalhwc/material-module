@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo } from "react";
 import Header from "@/components/layout/Header";
 import Link from "next/link";
-import { Plus, Wrench, Eye, CheckCircle, XCircle, Package, Search, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { Plus, Wrench, Eye, CheckCircle, XCircle, Package, Search, ArrowUpDown, ArrowUp, ArrowDown, Send } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { formatDate, cn } from "@/lib/utils";
 import type { StoreType } from "@/types";
@@ -74,6 +74,11 @@ export default function WIPPage() {
   const [receipts, setReceipts] = useState<PendingReceipt[]>([]);
   const [loadingReceipts, setLoadingReceipts] = useState(true);
   const [verifying, setVerifying] = useState<string | null>(null);
+
+  // RC transfer modal
+  const [transferItem, setTransferItem] = useState<WIPStock | null>(null);
+  const [transferQty, setTransferQty] = useState("");
+  const [transferring, setTransferring] = useState(false);
 
   // ── Fetch WIP stock ─────────────────────────────────────────
   const fetchStock = async () => {
@@ -185,14 +190,12 @@ export default function WIPPage() {
       const receipt = receipts.find((r) => r.id === reqId);
       if (!receipt) return;
 
-      // Update requisition status to approved
       const { error: reqErr } = await supabase
         .from("requisitions")
         .update({ status: "approved", approved_at: new Date().toISOString() })
         .eq("id", reqId);
       if (reqErr) throw reqErr;
 
-      // Insert WIP stock ledger entries (direction +1)
       const ledgerRows = receipt.items.map((it) => ({
         product_id: it.product_id,
         store: "wip" as StoreType,
@@ -226,14 +229,12 @@ export default function WIPPage() {
       const receipt = receipts.find((r) => r.id === reqId);
       if (!receipt) return;
 
-      // Return to submitted
       const { error: reqErr } = await supabase
         .from("requisitions")
         .update({ status: "submitted", issued_at: null, issued_by: null })
         .eq("id", reqId);
       if (reqErr) throw reqErr;
 
-      // Return stock to material_store
       const ledgerRows = receipt.items.map((it) => ({
         product_id: it.product_id,
         store: "material_store" as StoreType,
@@ -248,7 +249,6 @@ export default function WIPPage() {
       const { error: ledgerErr } = await supabase.from("stock_ledger").insert(ledgerRows);
       if (ledgerErr) throw ledgerErr;
 
-      // Clear issued quantities
       for (const it of receipt.items) {
         await supabase
           .from("requisition_items")
@@ -258,12 +258,74 @@ export default function WIPPage() {
 
       setReceipts((prev) => prev.filter((r) => r.id !== reqId));
       fetchStock();
-      alert("Rejected. Stock returned to Material Store. Requisition is now open for adjustment.");
+      alert("Rejected. Stock returned to Material Store.");
     } catch (err: any) {
       console.error("Rejection failed:", err);
       alert("Failed to reject: " + (err.message || "Unknown error"));
     } finally {
       setVerifying(null);
+    }
+  };
+
+  // ── RC Transfer handler ────────────────────────────────────
+  const handleSendToRC = async () => {
+    if (!transferItem) return;
+    const qty = parseFloat(transferQty);
+    if (isNaN(qty) || qty <= 0 || qty > transferItem.balance) {
+      alert("Please enter a valid quantity (up to available balance).");
+      return;
+    }
+    setTransferring(true);
+    try {
+      // 1. Insert rc_movements record
+      const { data: movement, error: moveErr } = await supabase
+        .from("rc_movements")
+        .insert({
+          product_id: transferItem.product_id,
+          direction: "return_from_wip",
+          quantity: qty,
+          uom: transferItem.uom,
+          reason: `Sent from WIP`,
+        })
+        .select()
+        .single();
+      if (moveErr) throw moveErr;
+
+      // 2. Stock ledger entries
+      const ledgerRows = [
+        {
+          product_id: transferItem.product_id,
+          store: "wip" as StoreType,
+          txn_type: "issued",
+          quantity: qty,
+          direction: -1,
+          reference_type: "rc_movement",
+          reference_id: movement.id,
+          notes: `Sent to RC Store – Ref ${movement.ref_number}`,
+        },
+        {
+          product_id: transferItem.product_id,
+          store: "rc_store" as StoreType,
+          txn_type: "received",
+          quantity: qty,
+          direction: 1,
+          reference_type: "rc_movement",
+          reference_id: movement.id,
+          notes: `Received from WIP – Ref ${movement.ref_number}`,
+        },
+      ];
+      const { error: ledgerErr } = await supabase.from("stock_ledger").insert(ledgerRows);
+      if (ledgerErr) throw ledgerErr;
+
+      // 3. Refresh stock
+      fetchStock();
+      setTransferItem(null);
+      setTransferQty("");
+    } catch (err: any) {
+      console.error("RC transfer failed:", err);
+      alert("Failed to transfer: " + (err.message || "Unknown error"));
+    } finally {
+      setTransferring(false);
     }
   };
 
@@ -295,7 +357,7 @@ export default function WIPPage() {
           ) : receipts.length === 0 ? (
             <div className="card p-6 text-center text-sm text-gray-400">
               <Package className="h-8 w-8 mx-auto mb-2 opacity-30" />
-              No pending receipts. All issued materials have been verified.
+              No pending receipts.
             </div>
           ) : (
             <div className="space-y-4">
@@ -309,25 +371,17 @@ export default function WIPPage() {
                       )}
                     </div>
                     <div className="flex gap-2">
-                      <button
-                        onClick={() => handleVerify(r.id)}
-                        disabled={verifying === r.id}
-                        className="btn-primary text-xs py-1 px-3 inline-flex items-center gap-1"
-                      >
+                      <button onClick={() => handleVerify(r.id)} disabled={verifying === r.id}
+                        className="btn-primary text-xs py-1 px-3 inline-flex items-center gap-1">
                         <CheckCircle className="h-3.5 w-3.5" />
-                        {verifying === r.id ? "Processing…" : "Verify"}
+                        {verifying === r.id ? "…" : "Verify"}
                       </button>
-                      <button
-                        onClick={() => handleReject(r.id)}
-                        disabled={verifying === r.id}
-                        className="btn-secondary text-xs py-1 px-3 inline-flex items-center gap-1 text-red-600 hover:bg-red-50"
-                      >
-                        <XCircle className="h-3.5 w-3.5" />
-                        Reject
+                      <button onClick={() => handleReject(r.id)} disabled={verifying === r.id}
+                        className="btn-secondary text-xs py-1 px-3 inline-flex items-center gap-1 text-red-600 hover:bg-red-50">
+                        <XCircle className="h-3.5 w-3.5" /> Reject
                       </button>
                     </div>
                   </div>
-
                   <table className="w-full text-sm border border-gray-100 rounded">
                     <thead className="bg-gray-50">
                       <tr>
@@ -399,11 +453,11 @@ export default function WIPPage() {
                     </th>
                     <th className="table-th text-right">Balance (UOM)</th>
                     <th className="table-th text-right">Balance (KG)</th>
+                    <th className="table-th"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {filteredStock.map((item) => {
-                    // Compute KG equivalent if bag product with conversion
                     const kgEquivalent =
                       item.uom === "bags" && item.conversion_kg
                         ? item.balance * item.conversion_kg
@@ -417,6 +471,14 @@ export default function WIPPage() {
                         <td className="table-td text-right font-medium">{item.balance.toFixed(3)}</td>
                         <td className="table-td text-right">
                           {kgEquivalent != null ? kgEquivalent.toFixed(3) : "—"}
+                        </td>
+                        <td className="table-td">
+                          <button
+                            className="text-xs text-purple-600 hover:text-purple-700 inline-flex items-center gap-1"
+                            onClick={() => { setTransferItem(item); setTransferQty(""); }}
+                          >
+                            <Send className="h-3 w-3" /> Send to RC
+                          </button>
                         </td>
                       </tr>
                     );
@@ -432,7 +494,6 @@ export default function WIPPage() {
           <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
             <Wrench className="h-5 w-5" /> Production Batches
           </h2>
-
           <div className="card overflow-hidden">
             {loadingBatches ? (
               <div className="flex items-center justify-center py-16 text-gray-400">Loading…</div>
@@ -483,6 +544,38 @@ export default function WIPPage() {
             )}
           </div>
         </section>
+
+        {/* ── RC Transfer Modal ──────────────────────────────── */}
+        {transferItem && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
+              <h2 className="text-lg font-semibold text-gray-800">
+                Send to RC Store: {transferItem.name}
+              </h2>
+              <p className="text-sm text-gray-500">
+                Available: {transferItem.balance.toFixed(3)} {transferItem.uom}
+              </p>
+              <div>
+                <label className="label">Quantity to send ({transferItem.uom})</label>
+                <input
+                  type="number"
+                  step="0.001"
+                  min="0"
+                  max={transferItem.balance}
+                  className="input"
+                  value={transferQty}
+                  onChange={(e) => setTransferQty(e.target.value)}
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button className="btn-secondary" onClick={() => setTransferItem(null)}>Cancel</button>
+                <button className="btn-primary" disabled={transferring} onClick={handleSendToRC}>
+                  {transferring ? "Sending..." : "Confirm Transfer"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </>
   );
