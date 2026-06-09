@@ -16,6 +16,7 @@ type FGStock = {
 type PendingTransfer = {
   id: string;
   from_store: string;
+  product_id: string;
   product_name: string;
   product_code: string;
   quantity: number;
@@ -35,7 +36,9 @@ export default function FinishedGoodsPage() {
   const [showIncoming, setShowIncoming] = useState(false);
 
   const fetchStock = async () => {
-    const { data } = await supabase.from("stock_balance").select("product_id, balance, products(code, name, uom)").eq("store", "finished_goods");
+    const { data } = await supabase.from("stock_balance")
+      .select("product_id, balance, products(code, name, uom)")
+      .eq("store", "finished_goods");
     if (data) {
       setStock(data.map((r: any) => ({
         product_id: r.product_id,
@@ -49,8 +52,22 @@ export default function FinishedGoodsPage() {
   };
 
   const fetchIncoming = async () => {
-    const { data } = await supabase.from("store_transfers").select("*, products(name, code)").eq("to_store", "finished_goods").eq("status", "pending");
-    if (data) setIncoming(data.map((r: any) => ({ id: r.id, from_store: r.from_store, product_name: r.products?.name ?? "", product_code: r.products?.code ?? "", quantity: r.quantity, uom: r.uom })));
+    const { data } = await supabase
+      .from("store_transfers")
+      .select(`*, products(name, code)`)
+      .eq("to_store", "finished_goods")
+      .eq("status", "pending");
+    if (data) {
+      setIncoming(data.map((r: any) => ({
+        id: r.id,
+        from_store: r.from_store,
+        product_id: r.product_id,
+        product_name: r.products?.name ?? "",
+        product_code: r.products?.code ?? "",
+        quantity: r.quantity,
+        uom: r.uom,
+      })));
+    }
   };
 
   useEffect(() => { fetchStock(); fetchIncoming(); }, []);
@@ -66,7 +83,9 @@ export default function FinishedGoodsPage() {
         ]);
         if (error) throw error;
       }
-      await supabase.from("store_transfers").update({ status: action, [action === "accepted" ? "accepted_at" : "rejected_at"]: new Date().toISOString() }).eq("id", id);
+      await supabase.from("store_transfers")
+        .update({ status: action, [action === "accepted" ? "accepted_at" : "rejected_at"]: new Date().toISOString() })
+        .eq("id", id);
       fetchIncoming(); fetchStock();
     } catch (e: any) { alert(e.message); }
   };
