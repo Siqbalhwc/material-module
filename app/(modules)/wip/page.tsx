@@ -1,13 +1,22 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Header from "@/components/layout/Header";
 import Link from "next/link";
-import { Plus, Wrench, Eye, CheckCircle, XCircle, Package, AlertTriangle } from "lucide-react";
+import { Plus, Wrench, Eye, CheckCircle, XCircle, Package, Search, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { formatDate, cn } from "@/lib/utils";
 import type { StoreType } from "@/types";
 
-// WIP Batch type (placeholder)
+// ── Types ─────────────────────────────────────────────────────
+type WIPStock = {
+  product_id: string;
+  code: string;
+  name: string;
+  category: string;
+  uom: string;
+  balance: number;
+};
+
 type WIPBatch = {
   id: string;
   batch_number: string;
@@ -20,7 +29,6 @@ type WIPBatch = {
   created_at: string;
 };
 
-// Pending receipt type (issued requisition)
 type PendingReceipt = {
   id: string;
   req_number: string;
@@ -44,10 +52,20 @@ const BATCH_STATUS_STYLE: Record<string, string> = {
   cancelled: "bg-red-100 text-red-600",
 };
 
+type SortField = "code" | "name" | "category" | "uom" | "balance";
+type SortDir = "asc" | "desc";
+
 export default function WIPPage() {
   const supabase = createClient();
 
-  // WIP batches
+  // WIP stock
+  const [stock, setStock] = useState<WIPStock[]>([]);
+  const [loadingStock, setLoadingStock] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortField, setSortField] = useState<SortField>("name");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  // Batches
   const [batches, setBatches] = useState<WIPBatch[]>([]);
   const [loadingBatches, setLoadingBatches] = useState(true);
 
@@ -56,7 +74,28 @@ export default function WIPPage() {
   const [loadingReceipts, setLoadingReceipts] = useState(true);
   const [verifying, setVerifying] = useState<string | null>(null);
 
-  // Fetch WIP batches (if table exists)
+  // ── Fetch WIP stock ─────────────────────────────────────────
+  const fetchStock = async () => {
+    const { data, error } = await supabase
+      .from("stock_balance")
+      .select(`product_id, balance, products ( code, name, category, uom )`)
+      .eq("store", "wip");
+
+    if (!error && data) {
+      const mapped: WIPStock[] = (data || []).map((row: any) => ({
+        product_id: row.product_id,
+        code: row.products?.code ?? "",
+        name: row.products?.name ?? "Unknown",
+        category: row.products?.category ?? "",
+        uom: row.products?.uom ?? "",
+        balance: row.balance ?? 0,
+      }));
+      setStock(mapped);
+    }
+    setLoadingStock(false);
+  };
+
+  // ── Fetch WIP batches ──────────────────────────────────────
   const fetchBatches = async () => {
     const { data, error } = await supabase
       .from("wip_batches")
@@ -69,7 +108,7 @@ export default function WIPPage() {
     setLoadingBatches(false);
   };
 
-  // Fetch issued requisitions (pending receipts)
+  // ── Fetch pending receipts ─────────────────────────────────
   const fetchReceipts = async () => {
     const { data, error } = await supabase
       .from("requisitions")
@@ -99,11 +138,45 @@ export default function WIPPage() {
   };
 
   useEffect(() => {
+    fetchStock();
     fetchBatches();
     fetchReceipts();
   }, []);
 
-  // Verify a receipt
+  // ── Stock filtering & sorting ──────────────────────────────
+  const filteredStock = useMemo(() => {
+    let list = [...stock];
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(i => i.name.toLowerCase().includes(q) || i.code.toLowerCase().includes(q));
+    }
+    list.sort((a, b) => {
+      let valA: any, valB: any;
+      switch (sortField) {
+        case "code": valA = a.code; valB = b.code; break;
+        case "name": valA = a.name; valB = b.name; break;
+        case "category": valA = a.category; valB = b.category; break;
+        case "uom": valA = a.uom; valB = b.uom; break;
+        case "balance": valA = a.balance; valB = b.balance; break;
+        default: return 0;
+      }
+      if (typeof valA === "string") return sortDir === "asc" ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      else return sortDir === "asc" ? valA - valB : valB - valA;
+    });
+    return list;
+  }, [stock, searchQuery, sortField, sortDir]);
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) setSortDir(prev => prev === "asc" ? "desc" : "asc");
+    else { setSortField(field); setSortDir("asc"); }
+  };
+
+  const renderSortIcon = (field: SortField) => {
+    if (sortField !== field) return <ArrowUpDown className="h-3 w-3 text-gray-300 ml-1" />;
+    return sortDir === "asc" ? <ArrowUp className="h-3 w-3 text-brand-600 ml-1" /> : <ArrowDown className="h-3 w-3 text-brand-600 ml-1" />;
+  };
+
+  // ── Verify / Reject handlers ────────────────────────────────
   const handleVerify = async (reqId: string) => {
     setVerifying(reqId);
     try {
@@ -117,7 +190,7 @@ export default function WIPPage() {
         .eq("id", reqId);
       if (reqErr) throw reqErr;
 
-      // Insert stock ledger entries for WIP (direction +1)
+      // Insert WIP stock ledger entries (direction +1)
       const ledgerRows = receipt.items.map((it) => ({
         product_id: it.product_id,
         store: "wip" as StoreType,
@@ -132,8 +205,9 @@ export default function WIPPage() {
       const { error: ledgerErr } = await supabase.from("stock_ledger").insert(ledgerRows);
       if (ledgerErr) throw ledgerErr;
 
-      // Remove from pending list
+      // Refresh data
       setReceipts((prev) => prev.filter((r) => r.id !== reqId));
+      fetchStock(); // re-fetch stock so it appears immediately
     } catch (err: any) {
       console.error("Verification failed:", err);
       alert("Failed to verify: " + (err.message || "Unknown error"));
@@ -142,24 +216,23 @@ export default function WIPPage() {
     }
   };
 
-  // Reject a receipt (return to store)
   const handleReject = async (reqId: string) => {
     const reason = prompt("Enter rejection reason:");
-    if (reason === null) return; // user cancelled
+    if (reason === null) return;
 
     setVerifying(reqId);
     try {
       const receipt = receipts.find((r) => r.id === reqId);
       if (!receipt) return;
 
-      // Update requisition status back to submitted
+      // Return to submitted
       const { error: reqErr } = await supabase
         .from("requisitions")
         .update({ status: "submitted", issued_at: null, issued_by: null })
         .eq("id", reqId);
       if (reqErr) throw reqErr;
 
-      // Return stock to material_store (direction +1)
+      // Return stock to material_store
       const ledgerRows = receipt.items.map((it) => ({
         product_id: it.product_id,
         store: "material_store" as StoreType,
@@ -174,7 +247,7 @@ export default function WIPPage() {
       const { error: ledgerErr } = await supabase.from("stock_ledger").insert(ledgerRows);
       if (ledgerErr) throw ledgerErr;
 
-      // Clear issued_qty in requisition_items
+      // Clear issued quantities
       for (const it of receipt.items) {
         await supabase
           .from("requisition_items")
@@ -182,9 +255,9 @@ export default function WIPPage() {
           .eq("id", it.id);
       }
 
-      // Remove from pending list
       setReceipts((prev) => prev.filter((r) => r.id !== reqId));
-      alert("Rejected. Stock returned to Material Store. Requisition is now re‑opened for adjustment.");
+      fetchStock(); // refresh stock (Material Store page will reflect the return)
+      alert("Rejected. Stock returned to Material Store.");
     } catch (err: any) {
       console.error("Rejection failed:", err);
       alert("Failed to reject: " + (err.message || "Unknown error"));
@@ -205,8 +278,8 @@ export default function WIPPage() {
         }
       />
       <main className="flex-1 p-6 space-y-8">
-        {/* Pending Receipts Section */}
-        <div>
+        {/* ── Pending Receipts ──────────────────────────────── */}
+        <section>
           <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
             <Package className="h-5 w-5" /> Pending Receipts
             {receipts.length > 0 && (
@@ -280,10 +353,69 @@ export default function WIPPage() {
               ))}
             </div>
           )}
-        </div>
+        </section>
 
-        {/* WIP Batches Section */}
-        <div>
+        {/* ── WIP Stock Balance ─────────────────────────────── */}
+        <section>
+          <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
+            <Wrench className="h-5 w-5" /> Current WIP Stock
+          </h2>
+
+          <div className="relative max-w-sm mb-3">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search by name or code..."
+              className="input pl-9"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+
+          <div className="card overflow-hidden">
+            {loadingStock ? (
+              <div className="flex items-center justify-center py-16 text-gray-400">Loading…</div>
+            ) : filteredStock.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-gray-400">
+                <Package className="h-10 w-10 mb-3 opacity-30" />
+                <p className="text-sm">No stock in WIP yet.</p>
+              </div>
+            ) : (
+              <table className="w-full">
+                <thead className="bg-gray-50 border-b border-gray-100">
+                  <tr>
+                    {(["code", "name", "category", "uom", "balance"] as SortField[]).map((field) => (
+                      <th
+                        key={field}
+                        className="table-th cursor-pointer select-none hover:bg-gray-100"
+                        onClick={() => handleSort(field)}
+                      >
+                        <span className="inline-flex items-center">
+                          {field.charAt(0).toUpperCase() + field.slice(1)}
+                          {renderSortIcon(field)}
+                        </span>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {filteredStock.map((item) => (
+                    <tr key={item.product_id} className="hover:bg-gray-50 transition-colors">
+                      <td className="table-td font-mono text-xs font-medium text-brand-600">{item.code}</td>
+                      <td className="table-td font-medium text-gray-900">{item.name}</td>
+                      <td className="table-td text-gray-500">{item.category}</td>
+                      <td className="table-td text-xs uppercase text-gray-500">{item.uom}</td>
+                      <td className="table-td font-medium">{item.balance.toFixed(3)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </section>
+
+        {/* ── WIP Batches ─────────────────────────────────────── */}
+        <section>
           <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
             <Wrench className="h-5 w-5" /> Production Batches
           </h2>
@@ -337,7 +469,7 @@ export default function WIPPage() {
               </table>
             )}
           </div>
-        </div>
+        </section>
       </main>
     </>
   );
