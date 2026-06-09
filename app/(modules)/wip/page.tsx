@@ -1,10 +1,9 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
 import Header from "@/components/layout/Header";
-import Link from "next/link";
 import {
-  Plus, Wrench, Eye, CheckCircle, XCircle, Package,
-  Search, ArrowUpDown, ArrowUp, ArrowDown, Send, Printer
+  CheckCircle, XCircle, Package,
+  Search, ArrowUpDown, ArrowUp, ArrowDown, Send, Printer, Wrench
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { formatDate, cn } from "@/lib/utils";
@@ -23,18 +22,6 @@ type WIPStock = {
   issued_fg: number;
   issued_rc: number;
   closing: number;
-};
-
-type WIPBatch = {
-  id: string;
-  batch_number: string;
-  product_id: string;
-  product_name?: string;
-  planned_qty: number;
-  actual_qty?: number;
-  status: string;
-  started_at?: string;
-  created_at: string;
 };
 
 type PendingReceipt = {
@@ -58,14 +45,6 @@ type FGProductOption = {
   code: string;
 };
 
-const BATCH_STATUS_STYLE: Record<string, string> = {
-  planned: "bg-gray-100 text-gray-600",
-  in_progress: "bg-amber-100 text-amber-700",
-  completed: "bg-green-100 text-green-700",
-  on_hold: "bg-orange-100 text-orange-700",
-  cancelled: "bg-red-100 text-red-600",
-};
-
 type SortField = "code" | "name" | "category" | "uom" | "closing";
 type SortDir = "asc" | "desc";
 
@@ -74,7 +53,7 @@ export default function WIPPage() {
 
   // Month filter
   const [selectedMonth, setSelectedMonth] = useState(
-    new Date().toISOString().slice(0, 7) // YYYY-MM
+    new Date().toISOString().slice(0, 7)
   );
 
   // WIP stock movements
@@ -83,10 +62,6 @@ export default function WIPPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortField, setSortField] = useState<SortField>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
-
-  // Batches
-  const [batches, setBatches] = useState<WIPBatch[]>([]);
-  const [loadingBatches, setLoadingBatches] = useState(true);
 
   // Pending receipts
   const [receipts, setReceipts] = useState<PendingReceipt[]>([]);
@@ -146,14 +121,13 @@ export default function WIPPage() {
 
     // 2. For each product, compute opening balance (sum of all movements before monthStart)
     for (const item of stockItems) {
-      const { data: before, error: beforeErr } = await supabase
+      const { data: before } = await supabase
         .from("stock_ledger")
         .select("quantity, direction")
         .eq("product_id", item.product_id)
         .eq("store", "wip")
         .lt("created_at", monthStart);
 
-      if (beforeErr) console.error(beforeErr);
       const opening = (before || []).reduce(
         (sum, r) => sum + r.quantity * r.direction,
         0
@@ -163,7 +137,7 @@ export default function WIPPage() {
 
     // 3. Within the selected month, sum received / issued
     for (const item of stockItems) {
-      const { data: monthData, error: monthErr } = await supabase
+      const { data: monthData } = await supabase
         .from("stock_ledger")
         .select("quantity, direction, txn_type, reference_type")
         .eq("product_id", item.product_id)
@@ -171,14 +145,8 @@ export default function WIPPage() {
         .gte("created_at", monthStart)
         .lt("created_at", monthEnd);
 
-      if (monthErr) {
-        console.error(monthErr);
-        continue;
-      }
-
       let received = 0, issued_fg = 0, issued_rc = 0;
       for (const r of (monthData || [])) {
-        const qty = r.quantity * r.direction;
         if (r.direction === 1 && r.txn_type === "received") {
           received += r.quantity;
         } else if (r.direction === -1) {
@@ -200,23 +168,9 @@ export default function WIPPage() {
     setLoadingStock(false);
   };
 
-  // Fetch whenever month changes
   useEffect(() => {
     fetchStock();
   }, [selectedMonth]);
-
-  // ── Fetch WIP batches ──────────────────────────────────────
-  const fetchBatches = async () => {
-    const { data, error } = await supabase
-      .from("wip_batches")
-      .select("*")
-      .order("created_at", { ascending: false });
-
-    if (!error && data) {
-      setBatches(data as WIPBatch[]);
-    }
-    setLoadingBatches(false);
-  };
 
   // ── Fetch pending receipts ─────────────────────────────────
   const fetchReceipts = async () => {
@@ -259,7 +213,6 @@ export default function WIPPage() {
   };
 
   useEffect(() => {
-    fetchBatches();
     fetchReceipts();
     fetchFGProducts();
   }, []);
@@ -300,7 +253,7 @@ export default function WIPPage() {
   // Print function
   const handlePrint = () => window.print();
 
-  // ── Verify / Reject handlers (unchanged) ──────────────────
+  // ── Verify / Reject handlers ──────────────────────────────
   const handleVerify = async (reqId: string) => {
     setVerifying(reqId);
     try {
@@ -521,13 +474,6 @@ export default function WIPPage() {
       <Header
         title="WIP – Production Management"
         subtitle="Verify incoming materials, manage stock, and transfer to RC or Finished Goods"
-        actions={
-          <div className="flex gap-2">
-            <Link href="/wip/new" className="btn-primary">
-              <Plus className="h-4 w-4" /> New Batch
-            </Link>
-          </div>
-        }
       />
       <main className="flex-1 p-6 space-y-8 print:space-y-4">
         {/* Month & Print controls */}
@@ -556,7 +502,63 @@ export default function WIPPage() {
               </span>
             )}
           </h2>
-          {/* ... (same as before) ... */}
+
+          {loadingReceipts ? (
+            <p className="text-sm text-gray-400">Loading...</p>
+          ) : receipts.length === 0 ? (
+            <div className="card p-6 text-center text-sm text-gray-400">
+              <Package className="h-8 w-8 mx-auto mb-2 opacity-30" />
+              No pending receipts.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {receipts.map((r) => (
+                <div key={r.id} className="card p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <p className="font-semibold text-gray-800">{r.req_number}</p>
+                      {r.required_date && (
+                        <p className="text-xs text-gray-500">Required by {formatDate(r.required_date)}</p>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => handleVerify(r.id)} disabled={verifying === r.id}
+                        className="btn-primary text-xs py-1 px-3 inline-flex items-center gap-1">
+                        <CheckCircle className="h-3.5 w-3.5" />
+                        {verifying === r.id ? "…" : "Verify"}
+                      </button>
+                      <button onClick={() => handleReject(r.id)} disabled={verifying === r.id}
+                        className="btn-secondary text-xs py-1 px-3 inline-flex items-center gap-1 text-red-600 hover:bg-red-50">
+                        <XCircle className="h-3.5 w-3.5" /> Reject
+                      </button>
+                    </div>
+                  </div>
+                  <table className="w-full text-sm border border-gray-100 rounded">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-2 py-1 text-left">Product</th>
+                        <th className="px-2 py-1 text-left">Code</th>
+                        <th className="px-2 py-1 text-right">Requested</th>
+                        <th className="px-2 py-1 text-right">Issued</th>
+                        <th className="px-2 py-1 text-left">UOM</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {r.items.map((it) => (
+                        <tr key={it.id}>
+                          <td className="px-2 py-1">{it.product_name}</td>
+                          <td className="px-2 py-1 font-mono text-xs">{it.product_code}</td>
+                          <td className="px-2 py-1 text-right">{it.requested_qty}</td>
+                          <td className="px-2 py-1 text-right">{it.issued_qty ?? "—"}</td>
+                          <td className="px-2 py-1 uppercase text-xs">{it.uom}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
 
         {/* WIP Stock Movements */}
@@ -624,7 +626,6 @@ export default function WIPPage() {
                         <button
                           className="text-xs text-brand-600 hover:text-brand-700 inline-flex items-center gap-1"
                           onClick={() => {
-                            // we need to pass a WIPStock-like item, but we have it
                             setTransferItem(item);
                             setTransferQty("");
                             setTransferTarget("rc");
@@ -644,63 +645,7 @@ export default function WIPPage() {
           </div>
         </section>
 
-        {/* Batches (hidden during print) */}
-        <section className="print:hidden">
-          <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-            <Wrench className="h-5 w-5" /> Production Batches
-          </h2>
-          <div className="card overflow-hidden">
-            {loadingBatches ? (
-              <div className="flex items-center justify-center py-16 text-gray-400">Loading…</div>
-            ) : batches.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-gray-400">
-                <Wrench className="h-10 w-10 mb-3 opacity-30" />
-                <p className="text-sm">No WIP batches yet</p>
-                <Link href="/wip/new" className="btn-primary mt-4">
-                  <Plus className="h-4 w-4" /> Create batch
-                </Link>
-              </div>
-            ) : (
-              <table className="w-full">
-                <thead className="bg-gray-50 border-b border-gray-100">
-                  <tr>
-                    <th className="table-th">Batch No.</th>
-                    <th className="table-th">Product</th>
-                    <th className="table-th">Planned Qty</th>
-                    <th className="table-th">Actual Qty</th>
-                    <th className="table-th">Started</th>
-                    <th className="table-th">Status</th>
-                    <th className="table-th"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {batches.map((b) => (
-                    <tr key={b.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="table-td font-mono text-xs font-medium text-brand-600">{b.batch_number}</td>
-                      <td className="table-td">{b.product_name || b.product_id}</td>
-                      <td className="table-td">{b.planned_qty}</td>
-                      <td className="table-td">{b.actual_qty ?? "—"}</td>
-                      <td className="table-td">{b.started_at ? formatDate(b.started_at) : "—"}</td>
-                      <td className="table-td">
-                        <span className={cn("badge", BATCH_STATUS_STYLE[b.status])}>
-                          {b.status.replace("_", " ")}
-                        </span>
-                      </td>
-                      <td className="table-td">
-                        <Link href={`/wip/${b.id}`}
-                          className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-brand-600 transition-colors">
-                          <Eye className="h-3.5 w-3.5" /> View
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </section>
-
-        {/* Transfer Out Modal (same as before) */}
+        {/* Transfer Out Modal */}
         {transferItem && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 print:hidden">
             <div className="bg-white rounded-xl shadow-xl w-full max-w-lg p-6 space-y-4">
@@ -710,7 +655,7 @@ export default function WIPPage() {
               <p className="text-sm text-gray-500">
                 Available: {transferItem.closing.toFixed(3)} {transferItem.uom}
               </p>
-              {/* ... existing modal fields ... */}
+
               <div>
                 <label className="label">Quantity to transfer ({transferItem.uom})</label>
                 <input
@@ -723,6 +668,7 @@ export default function WIPPage() {
                   onChange={(e) => setTransferQty(e.target.value)}
                 />
               </div>
+
               <div>
                 <label className="label">Destination</label>
                 <div className="flex gap-4 mt-1">
@@ -748,6 +694,7 @@ export default function WIPPage() {
                   </label>
                 </div>
               </div>
+
               {transferTarget === "fg" && (
                 <div className="space-y-3 border-t pt-3">
                   <p className="text-sm font-medium text-gray-700">Select Finished Good</p>
@@ -761,6 +708,7 @@ export default function WIPPage() {
                       <option key={p.id} value={p.id}>{p.name} ({p.code})</option>
                     ))}
                   </select>
+
                   <p className="text-sm text-gray-500">Or create a new finished good:</p>
                   <input
                     className="input"
@@ -768,6 +716,7 @@ export default function WIPPage() {
                     value={newFGName}
                     onChange={(e) => { setNewFGName(e.target.value); setSelectedFGProduct(""); }}
                   />
+
                   <div>
                     <label className="label">Finished Good Weight (kg)</label>
                     <input
@@ -779,9 +728,11 @@ export default function WIPPage() {
                       value={newFGWeight}
                       onChange={(e) => setNewFGWeight(e.target.value)}
                     />
+                    <p className="text-xs text-gray-400 mt-1">Weight of the finished good produced (if different from consumed qty)</p>
                   </div>
                 </div>
               )}
+
               <div className="flex justify-end gap-2">
                 <button className="btn-secondary" onClick={() => setTransferItem(null)}>Cancel</button>
                 <button className="btn-primary" disabled={transferring} onClick={handleTransfer}>
