@@ -1,131 +1,150 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Header from "@/components/layout/Header";
-import { Plus, Package, CheckCircle } from "lucide-react";
-import { fgApi } from "@/lib/api/client";
-import { formatDate } from "@/lib/utils";
+import { Search, ArrowUpDown, ArrowUp, ArrowDown, Package, X } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+import type { StoreType } from "@/types";
+
+type FGStock = {
+  product_id: string;
+  code: string;
+  name: string;
+  uom: string;
+  balance: number;
+};
+
+type PendingTransfer = {
+  id: string;
+  from_store: string;
+  product_name: string;
+  product_code: string;
+  quantity: number;
+  uom: string;
+};
+
+type SortField = "code" | "name" | "uom" | "balance";
 
 export default function FinishedGoodsPage() {
-  const [records, setRecords] = useState<any[]>([]);
+  const supabase = createClient();
+  const [stock, setStock] = useState<FGStock[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ product_id: "", quantity: "", uom: "units", qc_passed: true, qc_notes: "", batch_id: "" });
-  const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState("");
+  const [sortField, setSortField] = useState<SortField>("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [incoming, setIncoming] = useState<PendingTransfer[]>([]);
+  const [showIncoming, setShowIncoming] = useState(false);
 
-  useEffect(() => {
-    fgApi.list()
-      .then((r) => setRecords(r.data?.data || []))
-      .catch(() => setRecords([]))
-      .finally(() => setLoading(false));
-  }, []);
-
-  const handleTransfer = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    try {
-      const res = await fgApi.transfer({ ...form, quantity: parseFloat(form.quantity) });
-      setRecords((p) => [res.data?.data, ...p]);
-      setShowForm(false);
-    } catch {}
-    finally { setSaving(false); }
+  const fetchStock = async () => {
+    const { data } = await supabase.from("stock_balance").select("product_id, balance, products(code, name, uom)").eq("store", "finished_goods");
+    if (data) {
+      setStock(data.map((r: any) => ({
+        product_id: r.product_id,
+        code: r.products?.code ?? "",
+        name: r.products?.name ?? "",
+        uom: r.products?.uom ?? "",
+        balance: r.balance,
+      })));
+    }
+    setLoading(false);
   };
+
+  const fetchIncoming = async () => {
+    const { data } = await supabase.from("store_transfers").select("*, products(name, code)").eq("to_store", "finished_goods").eq("status", "pending");
+    if (data) setIncoming(data.map((r: any) => ({ id: r.id, from_store: r.from_store, product_name: r.products?.name ?? "", product_code: r.products?.code ?? "", quantity: r.quantity, uom: r.uom })));
+  };
+
+  useEffect(() => { fetchStock(); fetchIncoming(); }, []);
+
+  const handleAcceptReject = async (id: string, action: "accepted" | "rejected") => {
+    const transfer = incoming.find(t => t.id === id);
+    if (!transfer) return;
+    try {
+      if (action === "accepted") {
+        const { error } = await supabase.from("stock_ledger").insert([
+          { product_id: transfer.product_id, store: transfer.from_store as StoreType, txn_type: "issued", quantity: transfer.quantity, direction: -1, reference_type: "store_transfer", reference_id: id },
+          { product_id: transfer.product_id, store: "finished_goods" as StoreType, txn_type: "received", quantity: transfer.quantity, direction: 1, reference_type: "store_transfer", reference_id: id },
+        ]);
+        if (error) throw error;
+      }
+      await supabase.from("store_transfers").update({ status: action, [action === "accepted" ? "accepted_at" : "rejected_at"]: new Date().toISOString() }).eq("id", id);
+      fetchIncoming(); fetchStock();
+    } catch (e: any) { alert(e.message); }
+  };
+
+  const sorted = useMemo(() => {
+    let list = [...stock].filter(i => i.name.toLowerCase().includes(search.toLowerCase()) || i.code.toLowerCase().includes(search.toLowerCase()));
+    list.sort((a, b) => {
+      const valA = a[sortField] ?? "", valB = b[sortField] ?? "";
+      return typeof valA === "string" ? valA.localeCompare(valB) * (sortDir === "asc" ? 1 : -1) : (Number(valA) - Number(valB)) * (sortDir === "asc" ? 1 : -1);
+    });
+    return list;
+  }, [stock, search, sortField, sortDir]);
 
   return (
     <>
-      <Header
-        title="Finished Goods"
-        subtitle="Stage 4 → 5: QC-passed goods transferred from WIP"
-        actions={
-          <button className="btn-primary" onClick={() => setShowForm((v) => !v)}>
-            <Plus className="h-4 w-4" /> Record Transfer
-          </button>
-        }
-      />
+      <Header title="Finished Goods" subtitle="Final product inventory" />
       <main className="flex-1 p-6 space-y-4">
-        {showForm && (
-          <div className="card p-6 max-w-xl">
-            <h2 className="text-sm font-semibold text-gray-700 mb-4">FG Transfer from WIP</h2>
-            <form onSubmit={handleTransfer} className="grid grid-cols-2 gap-4">
-              <div className="col-span-2">
-                <label className="label">Product *</label>
-                <input className="input" required placeholder="Product ID"
-                  value={form.product_id} onChange={(e) => setForm((p) => ({ ...p, product_id: e.target.value }))} />
-              </div>
-              <div>
-                <label className="label">Quantity *</label>
-                <input className="input" type="number" step="0.001" min="0" required
-                  value={form.quantity} onChange={(e) => setForm((p) => ({ ...p, quantity: e.target.value }))} />
-              </div>
-              <div>
-                <label className="label">UOM</label>
-                <select className="input" value={form.uom}
-                  onChange={(e) => setForm((p) => ({ ...p, uom: e.target.value }))}>
-                  {["kg", "bags", "litres", "units", "pcs"].map((u) => (
-                    <option key={u} value={u}>{u}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="label">WIP Batch ID</label>
-                <input className="input" placeholder="Optional"
-                  value={form.batch_id} onChange={(e) => setForm((p) => ({ ...p, batch_id: e.target.value }))} />
-              </div>
-              <div className="flex items-center gap-2 pt-5">
-                <input type="checkbox" id="qc" className="rounded"
-                  checked={form.qc_passed} onChange={(e) => setForm((p) => ({ ...p, qc_passed: e.target.checked }))} />
-                <label htmlFor="qc" className="text-sm text-gray-700">QC Passed</label>
-              </div>
-              <div className="col-span-2">
-                <label className="label">QC Notes</label>
-                <input className="input" placeholder="Optional"
-                  value={form.qc_notes} onChange={(e) => setForm((p) => ({ ...p, qc_notes: e.target.value }))} />
-              </div>
-              <div className="col-span-2 flex justify-end gap-2">
-                <button type="button" className="btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
-                <button type="submit" className="btn-primary" disabled={saving}>
-                  {saving ? "Saving…" : "Record Transfer"}
-                </button>
-              </div>
-            </form>
+        <div className="flex justify-between items-center">
+          <div className="relative max-w-sm">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <input type="text" placeholder="Search..." className="input pl-9" value={search} onChange={e => setSearch(e.target.value)} />
           </div>
-        )}
+          <button className="btn-secondary relative" onClick={() => setShowIncoming(true)}>
+            <Package className="h-4 w-4" /> Incoming {incoming.length > 0 && <span className="absolute -top-1 -right-1 h-4 w-4 bg-red-500 text-white text-[10px] rounded-full flex items-center justify-center">{incoming.length}</span>}
+          </button>
+        </div>
 
         <div className="card overflow-hidden">
-          {loading ? (
-            <div className="flex items-center justify-center py-16 text-gray-400">Loading…</div>
-          ) : records.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-gray-400">
-              <Package className="h-10 w-10 mb-3 opacity-30" />
-              <p className="text-sm">No finished goods transfers yet</p>
-            </div>
-          ) : (
+          {loading ? <div className="py-16 text-center text-gray-400">Loading…</div> : sorted.length === 0 ? <div className="py-16 text-center text-gray-400">No stock.</div> : (
             <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-100">
+              <thead className="bg-gray-50">
                 <tr>
-                  {["Ref No.", "Product", "Quantity", "QC", "QC Notes", "Date"].map((h) => (
-                    <th key={h} className="table-th">{h}</th>
-                  ))}
+                  <th className="table-th cursor-pointer" onClick={() => { setSortField("code"); setSortDir(d => d === "asc" ? "desc" : "asc"); }}>Code</th>
+                  <th className="table-th cursor-pointer" onClick={() => { setSortField("name"); setSortDir(d => d === "asc" ? "desc" : "asc"); }}>Name</th>
+                  <th className="table-th cursor-pointer" onClick={() => { setSortField("uom"); setSortDir(d => d === "asc" ? "desc" : "asc"); }}>UOM</th>
+                  <th className="table-th text-right cursor-pointer" onClick={() => { setSortField("balance"); setSortDir(d => d === "asc" ? "desc" : "asc"); }}>Balance</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-50">
-                {records.map((r) => (
-                  <tr key={r.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="table-td font-mono text-xs text-brand-600">{r.ref_number}</td>
-                    <td className="table-td">{r.product?.name || r.product_id}</td>
-                    <td className="table-td">{r.quantity} {r.uom}</td>
-                    <td className="table-td">
-                      {r.qc_passed
-                        ? <CheckCircle className="h-4 w-4 text-green-500" />
-                        : <span className="text-xs text-red-500">Failed</span>}
-                    </td>
-                    <td className="table-td text-xs text-gray-400">{r.qc_notes || "—"}</td>
-                    <td className="table-td">{formatDate(r.transferred_at || r.created_at)}</td>
+              <tbody>
+                {sorted.map(item => (
+                  <tr key={item.product_id}>
+                    <td className="table-td font-mono text-xs">{item.code}</td>
+                    <td className="table-td font-medium">{item.name}</td>
+                    <td className="table-td uppercase text-xs">{item.uom}</td>
+                    <td className="table-td text-right">{item.balance.toFixed(3)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
         </div>
+
+        {showIncoming && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+            <div className="bg-white rounded-xl p-6 w-full max-w-2xl space-y-4">
+              <div className="flex justify-between"><h2 className="text-lg font-semibold">Incoming Transfers</h2><button onClick={() => setShowIncoming(false)}><X className="h-5 w-5" /></button></div>
+              {incoming.length === 0 ? <p className="text-sm text-gray-400">No pending transfers.</p> : (
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50"><tr><th className="px-2 py-1">From</th><th className="px-2 py-1">Product</th><th className="px-2 py-1 text-right">Qty</th><th className="px-2 py-1">UOM</th><th className="px-2 py-1"></th></tr></thead>
+                  <tbody>
+                    {incoming.map(t => (
+                      <tr key={t.id}>
+                        <td className="px-2 py-1">{t.from_store}</td>
+                        <td className="px-2 py-1">{t.product_name} ({t.product_code})</td>
+                        <td className="px-2 py-1 text-right">{t.quantity}</td>
+                        <td className="px-2 py-1">{t.uom}</td>
+                        <td className="px-2 py-1 text-right space-x-1">
+                          <button onClick={() => handleAcceptReject(t.id, "accepted")} className="text-green-600 text-xs">Accept</button>
+                          <button onClick={() => handleAcceptReject(t.id, "rejected")} className="text-red-600 text-xs">Reject</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        )}
       </main>
     </>
   );

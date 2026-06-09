@@ -15,7 +15,6 @@ const NAV = [
   { label: "Dashboard",        href: "/dashboard",                icon: LayoutDashboard },
   { label: "Gate Pass",        href: "/gate-pass",                icon: Truck },
   { label: "Material Store",   href: "/material-store",           icon: Warehouse },
-  { label: "Requisitions",     href: "/requisitions",             icon: FileText },
   { label: "WIP Batches",      href: "/wip",                      icon: Wrench },
   { label: "RC Store",         href: "/rc-store",                 icon: RotateCcw },
   { label: "Finished Goods",   href: "/finished-goods",           icon: Package },

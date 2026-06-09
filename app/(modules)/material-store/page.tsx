@@ -16,51 +16,46 @@ type MaterialStock = {
   reorder_level: number;
 };
 
-type PendingReqItem = {
+type PendingTransfer = {
   id: string;
+  from_store: string;
+  to_store: string;
   product_id: string;
   product_name: string;
   product_code: string;
   uom: string;
-  requested_qty: number;
-  bags_qty?: number | null;
-};
-
-type PendingReq = {
-  id: string;
-  req_number: string;
-  required_date: string | null;
-  items: PendingReqItem[];
+  quantity: number;
+  created_at: string;
 };
 
 type SortField = "code" | "name" | "category" | "uom" | "balance" | "reorder_level";
 type SortDir = "asc" | "desc";
 
 export default function MaterialStorePage() {
+  const supabase = createClient();
   const [stock, setStock] = useState<MaterialStock[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [sortField, setSortField] = useState<SortField>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
-  const [pendingReqs, setPendingReqs] = useState<PendingReq[]>([]);
-  const [loadingReqs, setLoadingReqs] = useState(true);
-  const [showReqModal, setShowReqModal] = useState(false);
-  const [selectedReq, setSelectedReq] = useState<PendingReq | null>(null);
-  const [issueQtys, setIssueQtys] = useState<Record<string, number>>({});
+  // Pending transfers FROM RC Store (to us)
+  const [incomingTransfers, setIncomingTransfers] = useState<PendingTransfer[]>([]);
+  const [showIncoming, setShowIncoming] = useState(false);
+
+  // Issue to WIP modal
+  const [issueItem, setIssueItem] = useState<MaterialStock | null>(null);
+  const [issueQty, setIssueQty] = useState("");
   const [issuing, setIssuing] = useState(false);
 
-  const supabase = createClient();
-
+  // ── Fetch stock ──────────────────────────────────────────
   const fetchStock = async () => {
     const { data, error } = await supabase
       .from("stock_balance")
       .select(`product_id, balance, products ( code, name, category, uom, reorder_level )`)
       .eq("store", "material_store");
 
-    if (error) {
-      console.error("Failed to fetch material store:", error);
-    } else {
+    if (!error && data) {
       const mapped: MaterialStock[] = (data || [])
         .filter((row: any) => {
           const cat = row.products?.category;
@@ -80,42 +75,37 @@ export default function MaterialStorePage() {
     setLoading(false);
   };
 
-  const fetchPendingReqs = async () => {
+  // ── Fetch incoming transfers (to material_store, status pending) ──
+  const fetchIncoming = async () => {
     const { data, error } = await supabase
-      .from("requisitions")
-      .select(`id, req_number, required_date, requisition_items(id, product_id, requested_qty, bags_qty, products(code, name, uom))`)
-      .eq("from_store", "material_store")
-      .eq("to_store", "wip")
-      .eq("status", "submitted")
+      .from("store_transfers")
+      .select(`*, products(code, name)`)
+      .eq("to_store", "material_store")
+      .eq("status", "pending")
       .order("created_at", { ascending: false });
 
     if (!error && data) {
-      const mapped: PendingReq[] = data.map((r: any) => ({
+      const mapped: PendingTransfer[] = data.map((r: any) => ({
         id: r.id,
-        req_number: r.req_number,
-        required_date: r.required_date,
-        items: (r.requisition_items || []).map((it: any) => ({
-          id: it.id,
-          product_id: it.product_id,
-          product_name: it.products?.name ?? "Unknown",
-          product_code: it.products?.code ?? "",
-          uom: it.uom,
-          requested_qty: it.requested_qty,
-          bags_qty: it.bags_qty,
-        })),
+        from_store: r.from_store,
+        to_store: r.to_store,
+        product_id: r.product_id,
+        product_name: r.products?.name ?? "Unknown",
+        product_code: r.products?.code ?? "",
+        uom: r.uom,
+        quantity: r.quantity,
+        created_at: r.created_at,
       }));
-      setPendingReqs(mapped);
-    } else if (error) {
-      console.error("Failed to fetch pending requisitions:", error);
+      setIncomingTransfers(mapped);
     }
-    setLoadingReqs(false);
   };
 
   useEffect(() => {
     fetchStock();
-    fetchPendingReqs();
+    fetchIncoming();
   }, []);
 
+  // ── Stock filtering & sorting ──────────────────────────────
   const filteredStock = useMemo(() => {
     let list = [...stock];
     if (searchQuery.trim()) {
@@ -149,55 +139,87 @@ export default function MaterialStorePage() {
     return sortDir === "asc" ? <ArrowUp className="h-3 w-3 text-brand-600 ml-1" /> : <ArrowDown className="h-3 w-3 text-brand-600 ml-1" />;
   };
 
-  const openIssueModal = (req: PendingReq) => {
-    setSelectedReq(req);
-    const initialQtys: Record<string, number> = {};
-    req.items.forEach(it => { initialQtys[it.id] = it.requested_qty; });
-    setIssueQtys(initialQtys);
-    setShowReqModal(true);
-  };
-
-  const handleIssue = async () => {
-    if (!selectedReq) return;
+  // ── Issue to WIP handler ───────────────────────────────────
+  const handleIssueToWIP = async () => {
+    if (!issueItem) return;
+    const qty = parseFloat(issueQty);
+    if (isNaN(qty) || qty <= 0 || qty > issueItem.balance) {
+      alert("Enter a valid quantity (max " + issueItem.balance + ")");
+      return;
+    }
     setIssuing(true);
     try {
-      const { error: reqErr } = await supabase
-        .from("requisitions")
-        .update({ status: "issued", issued_at: new Date().toISOString() })
-        .eq("id", selectedReq.id);
-      if (reqErr) throw reqErr;
-
-      const ledgerRows = selectedReq.items.map(it => ({
-        product_id: it.product_id,
-        store: "material_store" as StoreType,
-        txn_type: "issued",
-        quantity: issueQtys[it.id] ?? it.requested_qty,
-        direction: -1,
-        reference_type: "requisition",
-        reference_id: selectedReq.id,
-        notes: `Issued to WIP – Req ${selectedReq.req_number}`,
-      }));
-
-      const { error: ledgerErr } = await supabase.from("stock_ledger").insert(ledgerRows);
-      if (ledgerErr) throw ledgerErr;
-
-      for (const it of selectedReq.items) {
-        const qty = issueQtys[it.id] ?? it.requested_qty;
-        await supabase
-          .from("requisition_items")
-          .update({ issued_qty: qty })
-          .eq("id", it.id);
-      }
-
-      setShowReqModal(false);
-      setSelectedReq(null);
+      const { error } = await supabase.from("store_transfers").insert({
+        from_store: "material_store",
+        to_store: "wip",
+        product_id: issueItem.product_id,
+        quantity: qty,
+        uom: issueItem.uom,
+        status: "pending",
+        notes: `Issued to WIP`,
+      });
+      if (error) throw error;
+      alert("Transfer sent to WIP for acceptance.");
       fetchStock();
-      fetchPendingReqs();
+      setIssueItem(null);
+      setIssueQty("");
     } catch (err: any) {
-      console.error("Issue failed:", err);
-      alert("Failed to issue: " + (err.message || "Unknown error"));
+      console.error(err);
+      alert("Failed to create transfer: " + (err.message || ""));
     } finally {
       setIssuing(false);
+    }
+  };
+
+  // ── Handle incoming transfer (accept/reject from RC) ──────
+  const handleIncomingAction = async (transferId: string, action: "accepted" | "rejected") => {
+    try {
+      const transfer = incomingTransfers.find(t => t.id === transferId);
+      if (!transfer) return;
+
+      if (action === "accepted") {
+        // Move stock: -rc_store, +material_store
+        const ledgerRows = [
+          {
+            product_id: transfer.product_id,
+            store: transfer.from_store as StoreType,
+            txn_type: "issued",
+            quantity: transfer.quantity,
+            direction: -1,
+            reference_type: "store_transfer",
+            reference_id: transfer.id,
+            notes: `Sent to Material Store`,
+          },
+          {
+            product_id: transfer.product_id,
+            store: "material_store" as StoreType,
+            txn_type: "received",
+            quantity: transfer.quantity,
+            direction: 1,
+            reference_type: "store_transfer",
+            reference_id: transfer.id,
+            notes: `Received from RC Store`,
+          },
+        ];
+        const { error: ledgerErr } = await supabase.from("stock_ledger").insert(ledgerRows);
+        if (ledgerErr) throw ledgerErr;
+      }
+
+      // Update transfer status
+      const { error: updateErr } = await supabase
+        .from("store_transfers")
+        .update({
+          status: action,
+          [action === "accepted" ? "accepted_at" : "rejected_at"]: new Date().toISOString(),
+        })
+        .eq("id", transferId);
+      if (updateErr) throw updateErr;
+
+      fetchIncoming();
+      fetchStock();
+    } catch (err: any) {
+      console.error(err);
+      alert("Action failed: " + (err.message || ""));
     }
   };
 
@@ -207,17 +229,14 @@ export default function MaterialStorePage() {
         title="Material Store (Raw Materials & Chemicals)"
         subtitle="Current stock of production inputs"
         actions={
-          <button
-            className="relative btn-secondary flex items-center gap-2"
-            onClick={() => setShowReqModal(true)}
-          >
+          <button className="relative btn-secondary flex items-center gap-2" onClick={() => setShowIncoming(true)}>
             <Bell className="h-4 w-4" />
-            {pendingReqs.length > 0 && (
+            {incomingTransfers.length > 0 && (
               <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center">
-                {pendingReqs.length}
+                {incomingTransfers.length}
               </span>
             )}
-            Requests
+            Incoming
           </button>
         }
       />
@@ -239,7 +258,7 @@ export default function MaterialStorePage() {
           ) : filteredStock.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-gray-400">
               <Package className="h-10 w-10 mb-3 opacity-30" />
-              <p className="text-sm">{searchQuery ? "No items match your search" : "No stock recorded yet"}</p>
+              <p className="text-sm">No stock recorded yet</p>
             </div>
           ) : (
             <table className="w-full">
@@ -253,6 +272,7 @@ export default function MaterialStorePage() {
                       </span>
                     </th>
                   ))}
+                  <th className="table-th"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -269,6 +289,14 @@ export default function MaterialStorePage() {
                       <td className="table-td text-xs uppercase text-gray-500">{item.uom}</td>
                       <td className="table-td font-medium">{item.balance.toFixed(3)}</td>
                       <td className="table-td">{item.reorder_level}</td>
+                      <td className="table-td">
+                        <button
+                          className="text-xs text-brand-600 hover:text-brand-700 inline-flex items-center gap-1"
+                          onClick={() => { setIssueItem(item); setIssueQty(""); }}
+                        >
+                          <Send className="h-3 w-3" /> Issue to WIP
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -277,163 +305,66 @@ export default function MaterialStorePage() {
           )}
         </div>
 
-        {/* Pending Requisitions Modal */}
-        {showReqModal && (
+        {/* Incoming transfers modal */}
+        {showIncoming && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[80vh] overflow-y-auto p-6 space-y-4">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto p-6 space-y-4">
               <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-gray-800">Pending Requisitions</h2>
-                <button onClick={() => setShowReqModal(false)} className="p-1 text-gray-400 hover:text-gray-600">
-                  <X className="h-5 w-5" />
-                </button>
+                <h2 className="text-lg font-semibold">Incoming Transfers</h2>
+                <button onClick={() => setShowIncoming(false)} className="p-1 text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
               </div>
-
-              {loadingReqs ? (
-                <p className="text-sm text-gray-400">Loading...</p>
-              ) : pendingReqs.length === 0 ? (
-                <p className="text-sm text-gray-400">No pending requisitions.</p>
+              {incomingTransfers.length === 0 ? (
+                <p className="text-sm text-gray-400">No pending transfers.</p>
               ) : (
-                <div className="space-y-4">
-                  {pendingReqs.map(req => (
-                    <div key={req.id} className="border rounded-lg p-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <div>
-                          <p className="font-semibold text-gray-800">{req.req_number}</p>
-                          {req.required_date && <p className="text-xs text-gray-500">Required by {formatDate(req.required_date)}</p>}
-                        </div>
-                        <button
-                          className="btn-primary text-xs py-1 px-3 inline-flex items-center gap-1"
-                          onClick={() => openIssueModal(req)}
-                        >
-                          <Send className="h-3 w-3" /> Issue
-                        </button>
-                      </div>
-                      <table className="w-full text-xs">
-                        <thead className="text-gray-500 border-b">
-                          <tr>
-                            <th className="text-left py-1">Product</th>
-                            <th className="text-left">Code</th>
-                            <th className="text-right">Bags</th>
-                            <th className="text-right">Qty (KG)</th>
-                            <th className="text-left">UOM</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {req.items.map(it => (
-                            <tr key={it.id}>
-                              <td className="py-1">{it.product_name}</td>
-                              <td className="py-1 font-mono">{it.product_code}</td>
-                              <td className="py-1 text-right">{it.bags_qty != null ? it.bags_qty : "—"}</td>
-                              <td className="py-1 text-right">{it.requested_qty}</td>
-                              <td className="py-1 uppercase">{it.uom}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ))}
-                </div>
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b">
+                    <tr>
+                      <th className="px-2 py-1 text-left">From</th>
+                      <th className="px-2 py-1 text-left">Product</th>
+                      <th className="px-2 py-1 text-right">Qty</th>
+                      <th className="px-2 py-1 text-left">UOM</th>
+                      <th className="px-2 py-1"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {incomingTransfers.map(t => (
+                      <tr key={t.id}>
+                        <td className="px-2 py-1">{t.from_store}</td>
+                        <td className="px-2 py-1">{t.product_name} <span className="text-xs text-gray-400">({t.product_code})</span></td>
+                        <td className="px-2 py-1 text-right">{t.quantity}</td>
+                        <td className="px-2 py-1">{t.uom}</td>
+                        <td className="px-2 py-1 text-right space-x-1">
+                          <button onClick={() => handleIncomingAction(t.id, "accepted")} className="text-xs text-green-600 hover:text-green-700">Accept</button>
+                          <button onClick={() => handleIncomingAction(t.id, "rejected")} className="text-xs text-red-600 hover:text-red-700">Reject</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               )}
             </div>
           </div>
         )}
 
-        {/* Issue Modal */}
-        {selectedReq && (
+        {/* Issue to WIP modal */}
+        {issueItem && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl p-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold text-gray-800">
-                  Issue: {selectedReq.req_number}
-                </h2>
-                <button onClick={() => setSelectedReq(null)} className="p-1 text-gray-400 hover:text-gray-600">
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-              <p className="text-sm text-gray-500">
-                Adjust issued quantities if needed, then confirm.<br />
-                <span className="text-xs text-red-600 font-medium">
-                  ⚠ You cannot issue more than the available stock.
-                </span>
-              </p>
-
-              <table className="w-full text-sm">
-                <thead className="text-gray-600 border-b">
-                  <tr>
-                    <th className="text-left py-1">Product</th>
-                    <th className="text-left">Code</th>
-                    <th className="text-right">Bags</th>
-                    <th className="text-right">Requested</th>
-                    <th className="text-right">Available</th>
-                    <th className="text-right">Issue Qty</th>
-                    <th className="text-left">UOM</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {selectedReq.items.map((it) => {
-                    const stockItem = stock.find((s) => s.product_id === it.product_id);
-                    const available = stockItem ? stockItem.balance : 0;
-                    const issueQty = issueQtys[it.id] ?? it.requested_qty;
-                    const overIssue = issueQty > available;
-
-                    return (
-                      <tr key={it.id} className={cn(overIssue && "bg-red-50")}>
-                        <td className="py-2">{it.product_name}</td>
-                        <td className="py-2 font-mono text-xs">{it.product_code}</td>
-                        <td className="py-2 text-right">{it.bags_qty != null ? it.bags_qty : "—"}</td>
-                        <td className="py-2 text-right">{it.requested_qty}</td>
-                        <td className="py-2 text-right font-medium">{available.toFixed(3)}</td>
-                        <td className="py-2 text-right">
-                          <input
-                            type="number"
-                            step="0.001"
-                            min="0"
-                            max={available}
-                            className={cn("input w-20 text-right", overIssue && "border-red-400 bg-red-50")}
-                            value={issueQty}
-                            onChange={(e) =>
-                              setIssueQtys((prev) => ({
-                                ...prev,
-                                [it.id]: parseFloat(e.target.value) || 0,
-                              }))
-                            }
-                          />
-                          {overIssue && <p className="text-xs text-red-600 mt-1">Exceeds available</p>}
-                        </td>
-                        <td className="py-2 uppercase">{it.uom}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-
-              {selectedReq.items.some((it) => {
-                const stockItem = stock.find((s) => s.product_id === it.product_id);
-                const available = stockItem ? stockItem.balance : 0;
-                const issueQty = issueQtys[it.id] ?? it.requested_qty;
-                return issueQty > available;
-              }) && (
-                <div className="bg-red-50 text-red-700 text-sm p-3 rounded-md border border-red-200">
-                  One or more items exceed the available stock. Please reduce the quantities before confirming.
-                </div>
-              )}
-
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 space-y-4">
+              <h2 className="text-lg font-semibold">Issue to WIP: {issueItem.name}</h2>
+              <p className="text-sm text-gray-500">Available: {issueItem.balance.toFixed(3)} {issueItem.uom}</p>
+              <input
+                type="number"
+                step="0.001"
+                min="0"
+                max={issueItem.balance}
+                className="input"
+                value={issueQty}
+                onChange={(e) => setIssueQty(e.target.value)}
+              />
               <div className="flex justify-end gap-2">
-                <button className="btn-secondary" onClick={() => setSelectedReq(null)}>Cancel</button>
-                <button
-                  className="btn-primary"
-                  disabled={
-                    issuing ||
-                    selectedReq.items.some((it) => {
-                      const stockItem = stock.find((s) => s.product_id === it.product_id);
-                      const available = stockItem ? stockItem.balance : 0;
-                      const issueQty = issueQtys[it.id] ?? it.requested_qty;
-                      return issueQty > available || issueQty <= 0;
-                    })
-                  }
-                  onClick={handleIssue}
-                >
-                  {issuing ? "Issuing..." : "Confirm Issue"}
+                <button className="btn-secondary" onClick={() => setIssueItem(null)}>Cancel</button>
+                <button className="btn-primary" disabled={issuing} onClick={handleIssueToWIP}>
+                  {issuing ? "Sending..." : "Send"}
                 </button>
               </div>
             </div>
