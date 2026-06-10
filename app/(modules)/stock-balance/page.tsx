@@ -20,13 +20,15 @@ type ProductPosition = {
   code: string;
   name: string;
   uom: string;
-  opening: number;              // total across all stores before start date
-  inflows: number;              // total received during period
+  opening: number;
+  inflows: number;
+  dispatched: number;
   stores: StoreClosing;
-  totalClosing: number;         // sum of all store closings
+  totalClosing: number;
 };
 
-type SortField = "code" | "name" | "uom" | "opening" | "inflows" | "totalClosing";
+type SortField =
+  "code" | "name" | "uom" | "opening" | "inflows" | "dispatched" | "totalClosing";
 type SortDir = "asc" | "desc";
 
 const STORE_LABELS: Record<keyof StoreClosing, string> = {
@@ -56,13 +58,13 @@ export default function StockPositionPage() {
   const [sortField, setSortField] = useState<SortField>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
-  // Column visibility
   const [visibleColumns, setVisibleColumns] = useState({
     code: true,
     name: true,
     uom: true,
     opening: true,
     inflows: true,
+    dispatched: true,
     material_store: true,
     wip: true,
     rc_store: true,
@@ -72,13 +74,12 @@ export default function StockPositionPage() {
   });
   const [showColumnMenu, setShowColumnMenu] = useState(false);
 
-  // Drill‑down modal state
   const [drillProduct, setDrillProduct] = useState<ProductPosition | null>(null);
   const [drillStore, setDrillStore] = useState<keyof StoreClosing | null>(null);
   const [drillEntries, setDrillEntries] = useState<any[]>([]);
   const [drillLoading, setDrillLoading] = useState(false);
 
-  // ── Fetch position data ────────────────────────────────────
+  // ── Fetch data ──────────────────────────────────────────────
   const fetchPositions = async () => {
     setLoading(true);
     if (!startDate || !endDate || startDate > endDate) {
@@ -104,11 +105,7 @@ export default function StockPositionPage() {
 
     const uniqueMap = new Map<string, ProductPosition>();
     const storeKeys: (keyof StoreClosing)[] = [
-      "material_store",
-      "wip",
-      "rc_store",
-      "finished_goods",
-      "parts_store",
+      "material_store", "wip", "rc_store", "finished_goods", "parts_store",
     ];
 
     for (const row of allProducts) {
@@ -120,6 +117,7 @@ export default function StockPositionPage() {
           uom: (row.products as any)?.uom ?? "",
           opening: 0,
           inflows: 0,
+          dispatched: 0,
           stores: {
             material_store: 0,
             wip: 0,
@@ -134,7 +132,7 @@ export default function StockPositionPage() {
 
     const items = Array.from(uniqueMap.values());
 
-    // Compute opening balances (before start) per store
+    // Opening balances
     for (const item of items) {
       let totalOpening = 0;
       for (const store of storeKeys) {
@@ -145,8 +143,7 @@ export default function StockPositionPage() {
           .eq("store", store)
           .lt("created_at", start);
         const opening = (before || []).reduce(
-          (sum, r) => sum + r.quantity * r.direction,
-          0
+          (sum, r) => sum + r.quantity * r.direction, 0
         );
         (item as any)[`_opening_${store}`] = opening;
         totalOpening += opening;
@@ -154,16 +151,17 @@ export default function StockPositionPage() {
       item.opening = totalOpening;
     }
 
-    // Movements within the date range
+    // Movements within range
     for (const item of items) {
       const { data: rangeData } = await supabase
         .from("stock_ledger")
-        .select("quantity, direction, store")
+        .select("quantity, direction, store, reference_type")
         .eq("product_id", item.product_id)
         .gte("created_at", start)
         .lt("created_at", end);
 
       let totalInflows = 0;
+      let dispatched = 0;
       const storeMovements: Record<string, { in: number; out: number }> = {};
       for (const store of storeKeys) {
         storeMovements[store] = { in: 0, out: 0 };
@@ -177,13 +175,16 @@ export default function StockPositionPage() {
             totalInflows += r.quantity;
           } else if (r.direction === -1) {
             storeMovements[store].out += r.quantity;
+            if (r.reference_type === "outward_gate_pass") {
+              dispatched += r.quantity;
+            }
           }
         }
       }
 
       item.inflows = totalInflows;
+      item.dispatched = dispatched;
 
-      // Calculate closing per store = opening_store + in - out
       for (const store of storeKeys) {
         const opening = (item as any)[`_opening_${store}`] || 0;
         item.stores[store] =
@@ -191,8 +192,7 @@ export default function StockPositionPage() {
       }
 
       item.totalClosing = storeKeys.reduce(
-        (sum, store) => sum + item.stores[store],
-        0
+        (sum, store) => sum + item.stores[store], 0
       );
     }
 
@@ -221,13 +221,12 @@ export default function StockPositionPage() {
         case "uom": valA = a.uom; valB = b.uom; break;
         case "opening": valA = a.opening; valB = b.opening; break;
         case "inflows": valA = a.inflows; valB = b.inflows; break;
+        case "dispatched": valA = a.dispatched; valB = b.dispatched; break;
         case "totalClosing": valA = a.totalClosing; valB = b.totalClosing; break;
         default: return 0;
       }
       if (typeof valA === "string")
-        return sortDir === "asc"
-          ? valA.localeCompare(valB)
-          : valB.localeCompare(valA);
+        return sortDir === "asc" ? valA.localeCompare(valB) : valB.localeCompare(valA);
       else return sortDir === "asc" ? valA - valB : valB - valA;
     });
     return list;
@@ -256,7 +255,7 @@ export default function StockPositionPage() {
     setVisibleColumns(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  // ── Drill‑down handler ─────────────────────────────────────
+  // ── Drill‑down ──────────────────────────────────────────────
   const openDrillDown = async (
     product: ProductPosition,
     store: keyof StoreClosing
@@ -297,7 +296,7 @@ export default function StockPositionPage() {
     <>
       <Header
         title="Stock Position"
-        subtitle="Opening + Inflows = Total → broken down by store"
+        subtitle="Opening + Inflows – Dispatched = Total Closing"
       />
       <main className="flex-1 p-6 space-y-6 print:space-y-4">
         {/* Controls */}
@@ -362,7 +361,7 @@ export default function StockPositionPage() {
           </div>
         </div>
 
-        {/* Position Table */}
+        {/* Table */}
         <section>
           <div className="relative max-w-sm mb-3 print:hidden">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -383,7 +382,7 @@ export default function StockPositionPage() {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[1200px]">
+                <table className="w-full text-sm min-w-[1300px]">
                   <thead className="bg-gray-50">
                     <tr>
                       {visibleColumns.code && (
@@ -426,6 +425,14 @@ export default function StockPositionPage() {
                           Inflows (KG) {renderSortIcon("inflows")}
                         </th>
                       )}
+                      {visibleColumns.dispatched && (
+                        <th
+                          className="table-th cursor-pointer text-right"
+                          onClick={() => handleSort("dispatched")}
+                        >
+                          Dispatched (KG) {renderSortIcon("dispatched")}
+                        </th>
+                      )}
                       {visibleColumns.material_store && (
                         <th className="table-th text-right">
                           Material Store (KG)
@@ -458,92 +465,94 @@ export default function StockPositionPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {filtered.map(item => {
-                      const totalAvailable = item.opening + item.inflows;
-                      return (
-                        <tr
-                          key={item.product_id}
-                          className="hover:bg-gray-50"
-                        >
-                          {visibleColumns.code && (
-                            <td className="table-td font-mono text-xs">
-                              {item.code}
-                            </td>
-                          )}
-                          {visibleColumns.name && (
-                            <td className="table-td font-medium">
-                              {item.name}
-                            </td>
-                          )}
-                          {visibleColumns.uom && (
-                            <td className="table-td uppercase text-xs">
-                              {item.uom}
-                            </td>
-                          )}
-                          {visibleColumns.opening && (
-                            <td className="table-td text-right">
-                              {item.opening.toFixed(3)}
-                            </td>
-                          )}
-                          {visibleColumns.inflows && (
-                            <td className="table-td text-right">
-                              {item.inflows.toFixed(3)}
-                            </td>
-                          )}
-                          {visibleColumns.material_store && (
-                            <td
-                              className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
-                              onClick={() =>
-                                openDrillDown(item, "material_store")
-                              }
-                            >
-                              {item.stores.material_store.toFixed(3)}
-                            </td>
-                          )}
-                          {visibleColumns.wip && (
-                            <td
-                              className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
-                              onClick={() => openDrillDown(item, "wip")}
-                            >
-                              {item.stores.wip.toFixed(3)}
-                            </td>
-                          )}
-                          {visibleColumns.rc_store && (
-                            <td
-                              className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
-                              onClick={() => openDrillDown(item, "rc_store")}
-                            >
-                              {item.stores.rc_store.toFixed(3)}
-                            </td>
-                          )}
-                          {visibleColumns.finished_goods && (
-                            <td
-                              className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
-                              onClick={() =>
-                                openDrillDown(item, "finished_goods")
-                              }
-                            >
-                              {item.stores.finished_goods.toFixed(3)}
-                            </td>
-                          )}
-                          {visibleColumns.parts_store && (
-                            <td
-                              className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
-                              onClick={() =>
-                                openDrillDown(item, "parts_store")
-                              }
-                            >
-                              {item.stores.parts_store.toFixed(3)}
-                            </td>
-                          )}
-                          {visibleColumns.totalClosing && (
-                            <td className="table-td text-right font-medium">
-                              {item.totalClosing.toFixed(3)}
-                            </td>
-                          )}
-                        </tr>
-                      );
-                    })}
+                    {filtered.map(item => (
+                      <tr
+                        key={item.product_id}
+                        className="hover:bg-gray-50"
+                      >
+                        {visibleColumns.code && (
+                          <td className="table-td font-mono text-xs">
+                            {item.code}
+                          </td>
+                        )}
+                        {visibleColumns.name && (
+                          <td className="table-td font-medium">
+                            {item.name}
+                          </td>
+                        )}
+                        {visibleColumns.uom && (
+                          <td className="table-td uppercase text-xs">
+                            {item.uom}
+                          </td>
+                        )}
+                        {visibleColumns.opening && (
+                          <td className="table-td text-right">
+                            {item.opening.toFixed(3)}
+                          </td>
+                        )}
+                        {visibleColumns.inflows && (
+                          <td className="table-td text-right">
+                            {item.inflows.toFixed(3)}
+                          </td>
+                        )}
+                        {visibleColumns.dispatched && (
+                          <td className="table-td text-right">
+                            {item.dispatched.toFixed(3)}
+                          </td>
+                        )}
+                        {visibleColumns.material_store && (
+                          <td
+                            className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
+                            onClick={() =>
+                              openDrillDown(item, "material_store")
+                            }
+                          >
+                            {item.stores.material_store.toFixed(3)}
+                          </td>
+                        )}
+                        {visibleColumns.wip && (
+                          <td
+                            className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
+                            onClick={() => openDrillDown(item, "wip")}
+                          >
+                            {item.stores.wip.toFixed(3)}
+                          </td>
+                        )}
+                        {visibleColumns.rc_store && (
+                          <td
+                            className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
+                            onClick={() => openDrillDown(item, "rc_store")}
+                          >
+                            {item.stores.rc_store.toFixed(3)}
+                          </td>
+                        )}
+                        {visibleColumns.finished_goods && (
+                          <td
+                            className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
+                            onClick={() =>
+                              openDrillDown(item, "finished_goods")
+                            }
+                          >
+                            {item.stores.finished_goods.toFixed(3)}
+                          </td>
+                        )}
+                        {visibleColumns.parts_store && (
+                          <td
+                            className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
+                            onClick={() =>
+                              openDrillDown(item, "parts_store")
+                            }
+                          >
+                            {item.stores.parts_store.toFixed(3)}
+                          </td>
+                        )}
+                        {visibleColumns.totalClosing && (
+                          <td className="table-td text-right font-medium">
+                            {item.totalClosing.toFixed(3)}
+                          </td>
+                        )}
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
