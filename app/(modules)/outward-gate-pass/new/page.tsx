@@ -5,17 +5,17 @@ import Header from "@/components/layout/Header";
 import { Plus, Trash2, ArrowLeft, Save, CheckCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import Link from "next/link";
-import type { Product, Customer } from "@/types";
+import type { Customer } from "@/types";
 
 interface LineItem {
   product_id: string;
   product_name?: string;
-  category: string;
   uom: string;
   conversion_kg?: number;
   bags: string;
-  dispatched_qty: string;    // always KG
+  dispatched_qty: string;
   batch_number: string;
+  available: number;          // available stock in finished goods store
 }
 
 export default function NewOutwardGatePassPage() {
@@ -23,7 +23,7 @@ export default function NewOutwardGatePassPage() {
   const supabase = createClient();
 
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [finishedGoods, setFinishedGoods] = useState<Product[]>([]);
+  const [finishedGoods, setFinishedGoods] = useState<any[]>([]);   // products with balance
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -36,31 +36,38 @@ export default function NewOutwardGatePassPage() {
   });
 
   const [items, setItems] = useState<LineItem[]>([
-    { product_id: "", category: "Finished Good", uom: "kg", bags: "", dispatched_qty: "", batch_number: "" },
+    { product_id: "", uom: "kg", bags: "", dispatched_qty: "", batch_number: "", available: 0 },
   ]);
 
+  // Fetch customers and finished goods with available stock
   useEffect(() => {
     (async () => {
       const { data: cust } = await supabase.from("customers").select("*").eq("is_active", true);
       setCustomers(cust || []);
 
-      // Only fetch finished goods that have stock in finished_goods store
+      // Get finished goods that have stock in finished_goods store
       const { data: stockData } = await supabase
         .from("stock_balance")
-        .select("product_id, products(id, code, name, category, uom, conversion_kg)")
+        .select("product_id, balance, products( id, code, name, uom, conversion_kg )")
         .eq("store", "finished_goods");
 
       if (stockData) {
         const productsList = stockData
-          .filter((row: any) => row.products) // ensure product exists
-          .map((row: any) => row.products);
+          .filter((row: any) => row.products && row.balance > 0)   // only those with stock
+          .map((row: any) => ({
+            ...row.products,
+            balance: row.balance,
+          }));
         setFinishedGoods(productsList);
       }
     })();
   }, []);
 
   const addItem = () =>
-    setItems(prev => [...prev, { product_id: "", category: "Finished Good", uom: "kg", bags: "", dispatched_qty: "", batch_number: "" }]);
+    setItems(prev => [
+      ...prev,
+      { product_id: "", uom: "kg", bags: "", dispatched_qty: "", batch_number: "", available: 0 },
+    ]);
 
   const removeItem = (i: number) =>
     setItems(prev => prev.filter((_, idx) => idx !== i));
@@ -77,15 +84,18 @@ export default function NewOutwardGatePassPage() {
             updated.uom = prod.uom;
             updated.conversion_kg = prod.conversion_kg;
             updated.product_name = prod.name;
+            updated.available = prod.balance;        // set available stock
             updated.bags = "";
             updated.dispatched_qty = "";
           } else {
             updated.uom = "kg";
             updated.conversion_kg = undefined;
             updated.product_name = undefined;
+            updated.available = 0;
           }
         }
 
+        // Auto‑calculate kg when bags field changes
         if (field === "bags" && updated.uom === "bags" && updated.conversion_kg) {
           const bags = parseFloat(val);
           if (!isNaN(bags)) {
@@ -104,9 +114,21 @@ export default function NewOutwardGatePassPage() {
     setError("");
     if (!form.customer_id) { setError("Please select a customer."); return; }
     if (!form.vehicle_number) { setError("Vehicle number is required."); return; }
-    if (items.some(it => !it.product_id || !it.dispatched_qty)) {
-      setError("Please fill all product items with quantity.");
-      return;
+
+    for (const it of items) {
+      if (!it.product_id || !it.dispatched_qty) {
+        setError("Please fill all product items with quantity.");
+        return;
+      }
+      const qty = parseFloat(it.dispatched_qty);
+      if (isNaN(qty) || qty <= 0) {
+        setError("Quantity must be a positive number.");
+        return;
+      }
+      if (qty > it.available) {
+        setError(`Cannot dispatch more than available stock for ${it.product_name || "item"}. Available: ${it.available.toFixed(3)} ${it.uom}`);
+        return;
+      }
     }
 
     setLoading(true);
@@ -240,11 +262,13 @@ export default function NewOutwardGatePassPage() {
                       >
                         <option value="">-- Select Finished Good --</option>
                         {finishedGoods.map(p => (
-                          <option key={p.id} value={p.id}>{p.name} ({p.uom})</option>
+                          <option key={p.id} value={p.id}>
+                            {p.name} ({p.uom}) – Avail: {p.balance.toFixed(3)}
+                          </option>
                         ))}
                       </select>
                       {finishedGoods.length === 0 && (
-                        <p className="text-xs text-red-400 mt-1">No finished goods available. Create one in Products first.</p>
+                        <p className="text-xs text-red-400 mt-1">No finished goods available in stock.</p>
                       )}
                     </div>
 
@@ -264,12 +288,22 @@ export default function NewOutwardGatePassPage() {
                         {item.uom === "bags" ? "Total KG" : item.uom === "kg" ? "KG" : item.uom}
                       </label>
                       <input
-                        type="number" step="0.001" min="0" required className="input" placeholder="0.00"
+                        type="number"
+                        step="0.001"
+                        min="0"
+                        max={item.available || 0}
+                        required
+                        className="input"
+                        placeholder="0.00"
                         value={item.dispatched_qty}
                         onChange={e => updateItem(i, "dispatched_qty", e.target.value)}
                       />
-                      {item.uom === "bags" && item.conversion_kg && (
-                        <p className="text-xs text-gray-400 mt-1">1 bag = {item.conversion_kg} kg</p>
+                      {item.available > 0 && (
+                        <p className="text-xs text-gray-400 mt-1">
+                          Available: {item.available.toFixed(3)} {item.uom}
+                          {item.uom === "bags" && item.conversion_kg &&
+                            ` (≈ ${(item.available * item.conversion_kg).toFixed(3)} kg)`}
+                        </p>
                       )}
                     </div>
 
