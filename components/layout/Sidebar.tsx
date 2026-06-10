@@ -19,7 +19,6 @@ const NAV = [
   { label: "WIP Batches",      href: "/wip",                      icon: Wrench },
   { label: "RC Store",         href: "/rc-store",                 icon: RotateCcw },
   { label: "Finished Goods",   href: "/finished-goods",           icon: Package },
-  { label: "Dispatch",         href: "/dispatch",                 icon: Send },
   { label: "Stock Balance",    href: "/stock-balance",            icon: BarChart3 },
   { label: "Products",         href: "/products",                 icon: ShoppingBag },
   { label: "Outward Gate Pass", href: "/outward-gate-pass", icon: Send },
