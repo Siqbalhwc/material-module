@@ -20,15 +20,16 @@ type ProductPosition = {
   code: string;
   name: string;
   uom: string;
+  category: string;
   opening: number;
   inflows: number;
-  dispatched: number;
+  material_used: number;       // computed from FG dispatches
   stores: StoreClosing;
   totalClosing: number;
 };
 
 type SortField =
-  "code" | "name" | "uom" | "opening" | "inflows" | "dispatched" | "totalClosing";
+  "code" | "name" | "uom" | "opening" | "inflows" | "material_used" | "totalClosing";
 type SortDir = "asc" | "desc";
 
 const STORE_LABELS: Record<keyof StoreClosing, string> = {
@@ -64,7 +65,7 @@ export default function StockPositionPage() {
     uom: true,
     opening: true,
     inflows: true,
-    dispatched: true,
+    material_used: true,
     material_store: true,
     wip: true,
     rc_store: true,
@@ -93,9 +94,32 @@ export default function StockPositionPage() {
     endInclusive.setDate(endInclusive.getDate() + 1);
     const end = endInclusive.toISOString().slice(0, 10);
 
+    // Fetch all outward gate pass line items within the date range,
+    // with product name so we can match to raw materials
+    const { data: dispatchedItems, error: dispErr } = await supabase
+      .from("ogp_line_items")
+      .select("dispatched_qty, products( name )")
+      .gte("created_at", start)
+      .lt("created_at", end);
+
+    // Build a map: raw material name -> total dispatched qty
+    const dispatchMap = new Map<string, number>();
+    if (!dispErr && dispatchedItems) {
+      for (const item of dispatchedItems) {
+        const fgName = (item.products as any)?.name ?? "";
+        const qty = Number(item.dispatched_qty) || 0;
+        // We'll accumulate for each raw material whose name is contained in the FG name
+        // later when we process each product row
+        // For now we store per FG name
+        // We'll compute material_used per raw material by scanning all FGs
+        // in the loop below
+      }
+    }
+
+    // Fetch all products that have ever appeared in stock_ledger
     const { data: allProducts, error: prodErr } = await supabase
       .from("stock_ledger")
-      .select("product_id, products( code, name, uom, conversion_kg )");
+      .select("product_id, products( code, name, category, uom, conversion_kg )");
 
     if (prodErr || !allProducts) {
       setPositions([]);
@@ -110,14 +134,16 @@ export default function StockPositionPage() {
 
     for (const row of allProducts) {
       if (!uniqueMap.has(row.product_id)) {
+        const cat = (row.products as any)?.category ?? "";
         uniqueMap.set(row.product_id, {
           product_id: row.product_id,
           code: (row.products as any)?.code ?? "",
           name: (row.products as any)?.name ?? "Unknown",
           uom: (row.products as any)?.uom ?? "",
+          category: cat,
           opening: 0,
           inflows: 0,
-          dispatched: 0,
+          material_used: 0,
           stores: {
             material_store: 0,
             wip: 0,
@@ -151,17 +177,16 @@ export default function StockPositionPage() {
       item.opening = totalOpening;
     }
 
-    // Movements within range
+    // Movements within the date range
     for (const item of items) {
       const { data: rangeData } = await supabase
         .from("stock_ledger")
-        .select("quantity, direction, store, reference_type")
+        .select("quantity, direction, store")
         .eq("product_id", item.product_id)
         .gte("created_at", start)
         .lt("created_at", end);
 
       let totalInflows = 0;
-      let dispatched = 0;
       const storeMovements: Record<string, { in: number; out: number }> = {};
       for (const store of storeKeys) {
         storeMovements[store] = { in: 0, out: 0 };
@@ -175,25 +200,39 @@ export default function StockPositionPage() {
             totalInflows += r.quantity;
           } else if (r.direction === -1) {
             storeMovements[store].out += r.quantity;
-            if (r.reference_type === "outward_gate_pass") {
-              dispatched += r.quantity;
-            }
           }
         }
       }
 
       item.inflows = totalInflows;
-      item.dispatched = dispatched;
 
       for (const store of storeKeys) {
         const opening = (item as any)[`_opening_${store}`] || 0;
         item.stores[store] =
           opening + storeMovements[store].in - storeMovements[store].out;
       }
+    }
 
-      item.totalClosing = storeKeys.reduce(
-        (sum, store) => sum + item.stores[store], 0
-      );
+    // Compute material_used for each raw material
+    if (!dispErr && dispatchedItems) {
+      for (const item of items) {
+        if (item.category === "Raw Material" || item.category === "Chemical") {
+          let totalDispatchedFG = 0;
+          for (const d of dispatchedItems) {
+            const fgName = ((d.products as any)?.name ?? "").toLowerCase();
+            const rawName = item.name.toLowerCase();
+            if (fgName.includes(rawName)) {
+              totalDispatchedFG += Number(d.dispatched_qty) || 0;
+            }
+          }
+          item.material_used = totalDispatchedFG * 1.025;
+        }
+      }
+    }
+
+    // Compute totalClosing taking material_used into account
+    for (const item of items) {
+      item.totalClosing = item.opening + item.inflows - item.material_used;
     }
 
     setPositions(items);
@@ -221,7 +260,7 @@ export default function StockPositionPage() {
         case "uom": valA = a.uom; valB = b.uom; break;
         case "opening": valA = a.opening; valB = b.opening; break;
         case "inflows": valA = a.inflows; valB = b.inflows; break;
-        case "dispatched": valA = a.dispatched; valB = b.dispatched; break;
+        case "material_used": valA = a.material_used; valB = b.material_used; break;
         case "totalClosing": valA = a.totalClosing; valB = b.totalClosing; break;
         default: return 0;
       }
@@ -296,7 +335,7 @@ export default function StockPositionPage() {
     <>
       <Header
         title="Stock Position"
-        subtitle="Opening + Inflows – Dispatched = Total Closing"
+        subtitle="Opening + Inflows – Material Used = Total Closing"
       />
       <main className="flex-1 p-6 space-y-6 print:space-y-4">
         {/* Controls */}
@@ -342,7 +381,9 @@ export default function StockPositionPage() {
                           className="rounded border-gray-300"
                         />
                         <span className="capitalize text-gray-600">
-                          {key === "totalClosing"
+                          {key === "material_used"
+                            ? "Mat. Used (calc)"
+                            : key === "totalClosing"
                             ? "Total Closing"
                             : key.replace(/_/g, " ")}
                         </span>
@@ -425,12 +466,12 @@ export default function StockPositionPage() {
                           Inflows (KG) {renderSortIcon("inflows")}
                         </th>
                       )}
-                      {visibleColumns.dispatched && (
+                      {visibleColumns.material_used && (
                         <th
                           className="table-th cursor-pointer text-right"
-                          onClick={() => handleSort("dispatched")}
+                          onClick={() => handleSort("material_used")}
                         >
-                          Dispatched (KG) {renderSortIcon("dispatched")}
+                          Mat. Used (KG) {renderSortIcon("material_used")}
                         </th>
                       )}
                       {visibleColumns.material_store && (
@@ -495,9 +536,9 @@ export default function StockPositionPage() {
                             {item.inflows.toFixed(3)}
                           </td>
                         )}
-                        {visibleColumns.dispatched && (
+                        {visibleColumns.material_used && (
                           <td className="table-td text-right">
-                            {item.dispatched.toFixed(3)}
+                            {item.material_used.toFixed(3)}
                           </td>
                         )}
                         {visibleColumns.material_store && (
