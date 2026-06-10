@@ -22,6 +22,7 @@ const NAV = [
   { label: "Dispatch",         href: "/dispatch",                 icon: Send },
   { label: "Stock Balance",    href: "/stock-balance",            icon: BarChart3 },
   { label: "Products",         href: "/products",                 icon: ShoppingBag },
+  { label: "Outward Gate Pass", href: "/outward-gate-pass", icon: Send },
 ];
 
 export default function Sidebar() {
