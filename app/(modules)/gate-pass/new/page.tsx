@@ -10,7 +10,7 @@ import type { Product, Supplier } from "@/types";
 interface LineItem {
   product_id: string;
   product_name?: string;
-  category: string;            // per‑item category
+  category: string;
   uom: string;
   conversion_kg?: number;
   bags: string;
@@ -56,7 +56,6 @@ export default function NewGatePassPage() {
     })();
   }, []);
 
-  // Add a new blank item
   const addItem = () =>
     setItems((prev) => [
       ...prev,
@@ -72,25 +71,22 @@ export default function NewGatePassPage() {
         if (idx !== i) return it;
         const updated = { ...it, [field]: val };
 
-        // If product changed, fill its details
         if (field === "product_id") {
           const prod = products.find((p) => p.id === val);
           if (prod) {
             updated.uom = prod.uom;
             updated.conversion_kg = prod.conversion_kg;
             updated.product_name = prod.name;
-            updated.category = prod.category; // sync category
+            updated.category = prod.category;
             updated.bags = "";
             updated.received_qty = "";
           } else {
-            // product cleared – reset relevant fields but keep category
             updated.uom = "kg";
             updated.conversion_kg = undefined;
             updated.product_name = undefined;
           }
         }
 
-        // If bags changed, auto‑calculate total kg
         if (field === "bags" && updated.uom === "bags" && updated.conversion_kg) {
           const bags = parseFloat(val);
           if (!isNaN(bags)) {
@@ -100,7 +96,6 @@ export default function NewGatePassPage() {
           }
         }
 
-        // If category changed, clear product because the product list will change
         if (field === "category") {
           updated.product_id = "";
           updated.product_name = undefined;
@@ -111,7 +106,6 @@ export default function NewGatePassPage() {
     );
   };
 
-  // Filter products based on the item's own category
   const getFilteredProducts = (category: string) => {
     if (!category) return [];
     return products.filter((p) => p.category === category);
@@ -162,18 +156,22 @@ export default function NewGatePassPage() {
       const { error: lineErr } = await supabase.from("igp_line_items").insert(lineItemsPayload);
       if (lineErr) throw lineErr;
 
-      // 3. If verified, insert stock ledger entries
+      // 3. If verified, insert stock ledger entries – now with correct store per category
       if (status === "verified") {
-        const ledgerPayload = items.map((it) => ({
-          product_id: it.product_id,
-          store: "material_store",
-          txn_type: "received",
-          quantity: parseFloat(it.received_qty),
-          direction: 1,
-          reference_type: "gate_pass",
-          reference_id: gp.id,
-          notes: `IGP ${gp.igp_number}`,
-        }));
+        const ledgerPayload = items.map((it) => {
+          // Determine target store: "Store / Consumable" -> parts_store, else material_store
+          const targetStore = it.category === "Store / Consumable" ? "parts_store" : "material_store";
+          return {
+            product_id: it.product_id,
+            store: targetStore,
+            txn_type: "received",
+            quantity: parseFloat(it.received_qty),
+            direction: 1,
+            reference_type: "gate_pass",
+            reference_id: gp.id,
+            notes: `IGP ${gp.igp_number}`,
+          };
+        });
 
         const { error: ledgerErr } = await supabase.from("stock_ledger").insert(ledgerPayload);
         if (ledgerErr) throw ledgerErr;
@@ -300,7 +298,6 @@ export default function NewGatePassPage() {
                       )}
                     </div>
 
-                    {/* Responsive grid: one row on large screens, stacks on small */}
                     <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end">
                       {/* Category */}
                       <div className="md:col-span-2">
@@ -335,7 +332,6 @@ export default function NewGatePassPage() {
                         </select>
                       </div>
 
-                      {/* Bags (only if uom = bags) */}
                       {item.uom === "bags" && (
                         <div className="md:col-span-1">
                           <label className="label">Bags</label>
@@ -350,7 +346,6 @@ export default function NewGatePassPage() {
                         </div>
                       )}
 
-                      {/* Quantity (kg/litres/units) */}
                       <div className={item.uom === "bags" ? "md:col-span-2" : "md:col-span-3"}>
                         <label className="label">
                           {item.uom === "bags" ? "Total Kg" : item.uom === "kg" ? "Kg" : item.uom}
@@ -367,7 +362,6 @@ export default function NewGatePassPage() {
                         />
                       </div>
 
-                      {/* Batch number */}
                       <div className="md:col-span-2">
                         <label className="label">Batch No.</label>
                         <input
@@ -384,7 +378,6 @@ export default function NewGatePassPage() {
             </div>
           </div>
 
-          {/* Actions */}
           <div className="flex justify-end gap-3">
             <Link href="/gate-pass" className="btn-secondary">
               Cancel

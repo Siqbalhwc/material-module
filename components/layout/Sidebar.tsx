@@ -15,6 +15,7 @@ const NAV = [
   { label: "Dashboard",        href: "/dashboard",                icon: LayoutDashboard },
   { label: "Gate Pass",        href: "/gate-pass",                icon: Truck },
   { label: "Material Store",   href: "/material-store",           icon: Warehouse },
+  { label: "Parts Store",      href: "/parts-store",              icon: Package },
   { label: "WIP Batches",      href: "/wip",                      icon: Wrench },
   { label: "RC Store",         href: "/rc-store",                 icon: RotateCcw },
   { label: "Finished Goods",   href: "/finished-goods",           icon: Package },
@@ -114,7 +115,7 @@ export default function Sidebar() {
 
         <div className="border-t border-gray-100 my-2" />
 
-        {/* Admin – only visible to users with admin role */}
+        {/* Admin */}
         {isAdmin && (
           <Link
             href="/dashboard/admin"
