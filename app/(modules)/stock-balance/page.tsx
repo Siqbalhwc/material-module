@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo } from "react";
 import Header from "@/components/layout/Header";
 import {
-  Search, ArrowUpDown, ArrowUp, ArrowDown, Printer, Settings2, X, Package
+  Search, ArrowUpDown, ArrowUp, ArrowDown, Printer, Settings2, X
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { formatDate } from "@/lib/utils";
@@ -20,11 +20,10 @@ type ProductPosition = {
   code: string;
   name: string;
   uom: string;
-  conversion_kg?: number;
-  opening: number;             // total opening across all stores before start date
-  inflows: number;             // total received during period
+  opening: number;              // total across all stores before start date
+  inflows: number;              // total received during period
   stores: StoreClosing;
-  totalClosing: number;
+  totalClosing: number;         // sum of all store closings
 };
 
 type SortField = "code" | "name" | "uom" | "opening" | "inflows" | "totalClosing";
@@ -42,8 +41,12 @@ export default function StockPositionPage() {
   const supabase = createClient();
 
   const today = new Date();
-  const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
-  const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().slice(0, 10);
+  const firstDay = new Date(today.getFullYear(), today.getMonth(), 1)
+    .toISOString()
+    .slice(0, 10);
+  const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0)
+    .toISOString()
+    .slice(0, 10);
   const [startDate, setStartDate] = useState(firstDay);
   const [endDate, setEndDate] = useState(lastDay);
 
@@ -89,7 +92,6 @@ export default function StockPositionPage() {
     endInclusive.setDate(endInclusive.getDate() + 1);
     const end = endInclusive.toISOString().slice(0, 10);
 
-    // 1. Get all products that have ever appeared in any store
     const { data: allProducts, error: prodErr } = await supabase
       .from("stock_ledger")
       .select("product_id, products( code, name, uom, conversion_kg )");
@@ -101,7 +103,13 @@ export default function StockPositionPage() {
     }
 
     const uniqueMap = new Map<string, ProductPosition>();
-    const storeKeys: (keyof StoreClosing)[] = ["material_store", "wip", "rc_store", "finished_goods", "parts_store"];
+    const storeKeys: (keyof StoreClosing)[] = [
+      "material_store",
+      "wip",
+      "rc_store",
+      "finished_goods",
+      "parts_store",
+    ];
 
     for (const row of allProducts) {
       if (!uniqueMap.has(row.product_id)) {
@@ -110,7 +118,6 @@ export default function StockPositionPage() {
           code: (row.products as any)?.code ?? "",
           name: (row.products as any)?.name ?? "Unknown",
           uom: (row.products as any)?.uom ?? "",
-          conversion_kg: (row.products as any)?.conversion_kg ?? undefined,
           opening: 0,
           inflows: 0,
           stores: {
@@ -127,7 +134,7 @@ export default function StockPositionPage() {
 
     const items = Array.from(uniqueMap.values());
 
-    // 2. For each product, compute opening balance (before start) per store
+    // Compute opening balances (before start) per store
     for (const item of items) {
       let totalOpening = 0;
       for (const store of storeKeys) {
@@ -137,15 +144,17 @@ export default function StockPositionPage() {
           .eq("product_id", item.product_id)
           .eq("store", store)
           .lt("created_at", start);
-        const opening = (before || []).reduce((sum, r) => sum + r.quantity * r.direction, 0);
-        // We'll compute closing later; store opening temporarily
+        const opening = (before || []).reduce(
+          (sum, r) => sum + r.quantity * r.direction,
+          0
+        );
         (item as any)[`_opening_${store}`] = opening;
         totalOpening += opening;
       }
       item.opening = totalOpening;
     }
 
-    // 3. Movements within the date range
+    // Movements within the date range
     for (const item of items) {
       const { data: rangeData } = await supabase
         .from("stock_ledger")
@@ -177,11 +186,14 @@ export default function StockPositionPage() {
       // Calculate closing per store = opening_store + in - out
       for (const store of storeKeys) {
         const opening = (item as any)[`_opening_${store}`] || 0;
-        const closing = opening + storeMovements[store].in - storeMovements[store].out;
-        item.stores[store] = closing;
+        item.stores[store] =
+          opening + storeMovements[store].in - storeMovements[store].out;
       }
 
-      item.totalClosing = storeKeys.reduce((sum, store) => sum + item.stores[store], 0);
+      item.totalClosing = storeKeys.reduce(
+        (sum, store) => sum + item.stores[store],
+        0
+      );
     }
 
     setPositions(items);
@@ -197,8 +209,8 @@ export default function StockPositionPage() {
     let list = [...positions];
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      list = list.filter(i =>
-        i.name.toLowerCase().includes(q) || i.code.toLowerCase().includes(q)
+      list = list.filter(
+        i => i.name.toLowerCase().includes(q) || i.code.toLowerCase().includes(q)
       );
     }
     list.sort((a, b) => {
@@ -213,20 +225,31 @@ export default function StockPositionPage() {
         default: return 0;
       }
       if (typeof valA === "string")
-        return sortDir === "asc" ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        return sortDir === "asc"
+          ? valA.localeCompare(valB)
+          : valB.localeCompare(valA);
       else return sortDir === "asc" ? valA - valB : valB - valA;
     });
     return list;
   }, [positions, searchQuery, sortField, sortDir]);
 
   const handleSort = (field: SortField) => {
-    if (sortField === field) setSortDir(prev => prev === "asc" ? "desc" : "asc");
-    else { setSortField(field); setSortDir("asc"); }
+    if (sortField === field)
+      setSortDir(prev => (prev === "asc" ? "desc" : "asc"));
+    else {
+      setSortField(field);
+      setSortDir("asc");
+    }
   };
 
   const renderSortIcon = (field: SortField) => {
-    if (sortField !== field) return <ArrowUpDown className="h-3 w-3 text-gray-300 ml-1" />;
-    return sortDir === "asc" ? <ArrowUp className="h-3 w-3 text-brand-600 ml-1" /> : <ArrowDown className="h-3 w-3 text-brand-600 ml-1" />;
+    if (sortField !== field)
+      return <ArrowUpDown className="h-3 w-3 text-gray-300 ml-1" />;
+    return sortDir === "asc" ? (
+      <ArrowUp className="h-3 w-3 text-brand-600 ml-1" />
+    ) : (
+      <ArrowDown className="h-3 w-3 text-brand-600 ml-1" />
+    );
   };
 
   const toggleColumn = (key: keyof typeof visibleColumns) => {
@@ -234,7 +257,10 @@ export default function StockPositionPage() {
   };
 
   // ── Drill‑down handler ─────────────────────────────────────
-  const openDrillDown = async (product: ProductPosition, store: keyof StoreClosing) => {
+  const openDrillDown = async (
+    product: ProductPosition,
+    store: keyof StoreClosing
+  ) => {
     setDrillProduct(product);
     setDrillStore(store);
     setDrillLoading(true);
@@ -246,7 +272,9 @@ export default function StockPositionPage() {
 
     const { data } = await supabase
       .from("stock_ledger")
-      .select("quantity, direction, txn_type, reference_type, reference_id, notes, created_at")
+      .select(
+        "quantity, direction, txn_type, reference_type, reference_id, notes, created_at"
+      )
       .eq("product_id", product.product_id)
       .eq("store", store)
       .gte("created_at", start)
@@ -269,16 +297,26 @@ export default function StockPositionPage() {
     <>
       <Header
         title="Stock Position"
-        subtitle="Cross‑store inventory report – Opening + Inflows = Closing"
+        subtitle="Opening + Inflows = Total → broken down by store"
       />
       <main className="flex-1 p-6 space-y-6 print:space-y-4">
-        {/* Date range, columns, print */}
+        {/* Controls */}
         <div className="flex items-center justify-between print:hidden">
           <div className="flex items-center gap-3">
             <label className="text-sm font-medium">From:</label>
-            <input type="date" className="input" value={startDate} onChange={e => setStartDate(e.target.value)} />
+            <input
+              type="date"
+              className="input"
+              value={startDate}
+              onChange={e => setStartDate(e.target.value)}
+            />
             <label className="text-sm font-medium">To:</label>
-            <input type="date" className="input" value={endDate} onChange={e => setEndDate(e.target.value)} />
+            <input
+              type="date"
+              className="input"
+              value={endDate}
+              onChange={e => setEndDate(e.target.value)}
+            />
           </div>
           <div className="flex items-center gap-2">
             <div className="relative">
@@ -292,10 +330,22 @@ export default function StockPositionPage() {
                 <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-md shadow-lg z-20 text-xs">
                   <div className="p-2 space-y-1">
                     {Object.entries(visibleColumns).map(([key, value]) => (
-                      <label key={key} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded">
-                        <input type="checkbox" checked={value} onChange={() => toggleColumn(key as keyof typeof visibleColumns)} className="rounded border-gray-300" />
+                      <label
+                        key={key}
+                        className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={value}
+                          onChange={() =>
+                            toggleColumn(key as keyof typeof visibleColumns)
+                          }
+                          className="rounded border-gray-300"
+                        />
                         <span className="capitalize text-gray-600">
-                          {key === "totalClosing" ? "Total Closing" : key.replace(/_/g, " ")}
+                          {key === "totalClosing"
+                            ? "Total Closing"
+                            : key.replace(/_/g, " ")}
                         </span>
                       </label>
                     ))}
@@ -303,7 +353,10 @@ export default function StockPositionPage() {
                 </div>
               )}
             </div>
-            <button onClick={handlePrint} className="btn-secondary flex items-center gap-1">
+            <button
+              onClick={handlePrint}
+              className="btn-secondary flex items-center gap-1"
+            >
               <Printer className="h-4 w-4" /> Print / PDF
             </button>
           </div>
@@ -313,84 +366,184 @@ export default function StockPositionPage() {
         <section>
           <div className="relative max-w-sm mb-3 print:hidden">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <input type="text" placeholder="Search by name or code..." className="input pl-9" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+            <input
+              type="text"
+              placeholder="Search by name or code..."
+              className="input pl-9"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+            />
           </div>
           <div className="card overflow-hidden">
             {loading ? (
               <div className="py-16 text-center text-gray-400">Loading…</div>
             ) : filtered.length === 0 ? (
-              <div className="py-16 text-center text-gray-400">No data for the selected range.</div>
+              <div className="py-16 text-center text-gray-400">
+                No data for the selected range.
+              </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm min-w-[1200px]">
                   <thead className="bg-gray-50">
                     <tr>
-                      {visibleColumns.code && <th className="table-th cursor-pointer" onClick={() => handleSort("code")}>Code {renderSortIcon("code")}</th>}
-                      {visibleColumns.name && <th className="table-th cursor-pointer" onClick={() => handleSort("name")}>Name {renderSortIcon("name")}</th>}
-                      {visibleColumns.uom && <th className="table-th cursor-pointer" onClick={() => handleSort("uom")}>UOM {renderSortIcon("uom")}</th>}
-                      {visibleColumns.opening && <th className="table-th cursor-pointer text-right" onClick={() => handleSort("opening")}>Opening (KG) {renderSortIcon("opening")}</th>}
-                      {visibleColumns.inflows && <th className="table-th cursor-pointer text-right" onClick={() => handleSort("inflows")}>Inflows (KG) {renderSortIcon("inflows")}</th>}
-                      {visibleColumns.material_store && <th className="table-th text-right">Material Store (KG)</th>}
-                      {visibleColumns.wip && <th className="table-th text-right">WIP (KG)</th>}
-                      {visibleColumns.rc_store && <th className="table-th text-right">RC Store (KG)</th>}
-                      {visibleColumns.finished_goods && <th className="table-th text-right">Finished Goods (KG)</th>}
-                      {visibleColumns.parts_store && <th className="table-th text-right">Parts Store (KG)</th>}
-                      {visibleColumns.totalClosing && <th className="table-th cursor-pointer text-right" onClick={() => handleSort("totalClosing")}>Total Closing (KG) {renderSortIcon("totalClosing")}</th>}
+                      {visibleColumns.code && (
+                        <th
+                          className="table-th cursor-pointer"
+                          onClick={() => handleSort("code")}
+                        >
+                          Code {renderSortIcon("code")}
+                        </th>
+                      )}
+                      {visibleColumns.name && (
+                        <th
+                          className="table-th cursor-pointer"
+                          onClick={() => handleSort("name")}
+                        >
+                          Name {renderSortIcon("name")}
+                        </th>
+                      )}
+                      {visibleColumns.uom && (
+                        <th
+                          className="table-th cursor-pointer"
+                          onClick={() => handleSort("uom")}
+                        >
+                          UOM {renderSortIcon("uom")}
+                        </th>
+                      )}
+                      {visibleColumns.opening && (
+                        <th
+                          className="table-th cursor-pointer text-right"
+                          onClick={() => handleSort("opening")}
+                        >
+                          Opening (KG) {renderSortIcon("opening")}
+                        </th>
+                      )}
+                      {visibleColumns.inflows && (
+                        <th
+                          className="table-th cursor-pointer text-right"
+                          onClick={() => handleSort("inflows")}
+                        >
+                          Inflows (KG) {renderSortIcon("inflows")}
+                        </th>
+                      )}
+                      {visibleColumns.material_store && (
+                        <th className="table-th text-right">
+                          Material Store (KG)
+                        </th>
+                      )}
+                      {visibleColumns.wip && (
+                        <th className="table-th text-right">WIP (KG)</th>
+                      )}
+                      {visibleColumns.rc_store && (
+                        <th className="table-th text-right">RC Store (KG)</th>
+                      )}
+                      {visibleColumns.finished_goods && (
+                        <th className="table-th text-right">
+                          Finished Goods (KG)
+                        </th>
+                      )}
+                      {visibleColumns.parts_store && (
+                        <th className="table-th text-right">
+                          Parts Store (KG)
+                        </th>
+                      )}
+                      {visibleColumns.totalClosing && (
+                        <th
+                          className="table-th cursor-pointer text-right"
+                          onClick={() => handleSort("totalClosing")}
+                        >
+                          Total Closing (KG) {renderSortIcon("totalClosing")}
+                        </th>
+                      )}
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {filtered.map(item => (
-                      <tr key={item.product_id} className="hover:bg-gray-50">
-                        {visibleColumns.code && <td className="table-td font-mono text-xs">{item.code}</td>}
-                        {visibleColumns.name && <td className="table-td font-medium">{item.name}</td>}
-                        {visibleColumns.uom && <td className="table-td uppercase text-xs">{item.uom}</td>}
-                        {visibleColumns.opening && <td className="table-td text-right">{item.opening.toFixed(3)}</td>}
-                        {visibleColumns.inflows && <td className="table-td text-right">{item.inflows.toFixed(3)}</td>}
-                        {visibleColumns.material_store && (
-                          <td
-                            className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
-                            onClick={() => openDrillDown(item, "material_store")}
-                          >
-                            {item.stores.material_store.toFixed(3)}
-                          </td>
-                        )}
-                        {visibleColumns.wip && (
-                          <td
-                            className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
-                            onClick={() => openDrillDown(item, "wip")}
-                          >
-                            {item.stores.wip.toFixed(3)}
-                          </td>
-                        )}
-                        {visibleColumns.rc_store && (
-                          <td
-                            className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
-                            onClick={() => openDrillDown(item, "rc_store")}
-                          >
-                            {item.stores.rc_store.toFixed(3)}
-                          </td>
-                        )}
-                        {visibleColumns.finished_goods && (
-                          <td
-                            className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
-                            onClick={() => openDrillDown(item, "finished_goods")}
-                          >
-                            {item.stores.finished_goods.toFixed(3)}
-                          </td>
-                        )}
-                        {visibleColumns.parts_store && (
-                          <td
-                            className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
-                            onClick={() => openDrillDown(item, "parts_store")}
-                          >
-                            {item.stores.parts_store.toFixed(3)}
-                          </td>
-                        )}
-                        {visibleColumns.totalClosing && (
-                          <td className="table-td text-right font-medium">{item.totalClosing.toFixed(3)}</td>
-                        )}
-                      </tr>
-                    ))}
+                    {filtered.map(item => {
+                      const totalAvailable = item.opening + item.inflows;
+                      return (
+                        <tr
+                          key={item.product_id}
+                          className="hover:bg-gray-50"
+                        >
+                          {visibleColumns.code && (
+                            <td className="table-td font-mono text-xs">
+                              {item.code}
+                            </td>
+                          )}
+                          {visibleColumns.name && (
+                            <td className="table-td font-medium">
+                              {item.name}
+                            </td>
+                          )}
+                          {visibleColumns.uom && (
+                            <td className="table-td uppercase text-xs">
+                              {item.uom}
+                            </td>
+                          )}
+                          {visibleColumns.opening && (
+                            <td className="table-td text-right">
+                              {item.opening.toFixed(3)}
+                            </td>
+                          )}
+                          {visibleColumns.inflows && (
+                            <td className="table-td text-right">
+                              {item.inflows.toFixed(3)}
+                            </td>
+                          )}
+                          {visibleColumns.material_store && (
+                            <td
+                              className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
+                              onClick={() =>
+                                openDrillDown(item, "material_store")
+                              }
+                            >
+                              {item.stores.material_store.toFixed(3)}
+                            </td>
+                          )}
+                          {visibleColumns.wip && (
+                            <td
+                              className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
+                              onClick={() => openDrillDown(item, "wip")}
+                            >
+                              {item.stores.wip.toFixed(3)}
+                            </td>
+                          )}
+                          {visibleColumns.rc_store && (
+                            <td
+                              className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
+                              onClick={() => openDrillDown(item, "rc_store")}
+                            >
+                              {item.stores.rc_store.toFixed(3)}
+                            </td>
+                          )}
+                          {visibleColumns.finished_goods && (
+                            <td
+                              className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
+                              onClick={() =>
+                                openDrillDown(item, "finished_goods")
+                              }
+                            >
+                              {item.stores.finished_goods.toFixed(3)}
+                            </td>
+                          )}
+                          {visibleColumns.parts_store && (
+                            <td
+                              className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
+                              onClick={() =>
+                                openDrillDown(item, "parts_store")
+                              }
+                            >
+                              {item.stores.parts_store.toFixed(3)}
+                            </td>
+                          )}
+                          {visibleColumns.totalClosing && (
+                            <td className="table-td text-right font-medium">
+                              {item.totalClosing.toFixed(3)}
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -406,7 +559,10 @@ export default function StockPositionPage() {
                 <h2 className="text-lg font-semibold">
                   {drillProduct.name} – {STORE_LABELS[drillStore]}
                 </h2>
-                <button onClick={closeDrillDown} className="p-1 text-gray-400 hover:text-gray-600">
+                <button
+                  onClick={closeDrillDown}
+                  className="p-1 text-gray-400 hover:text-gray-600"
+                >
                   <X className="h-5 w-5" />
                 </button>
               </div>
@@ -417,7 +573,9 @@ export default function StockPositionPage() {
               {drillLoading ? (
                 <p className="text-sm text-gray-400">Loading...</p>
               ) : drillEntries.length === 0 ? (
-                <p className="text-sm text-gray-400">No movements in the selected period.</p>
+                <p className="text-sm text-gray-400">
+                  No movements in the selected period.
+                </p>
               ) : (
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b">
@@ -433,12 +591,23 @@ export default function StockPositionPage() {
                   <tbody className="divide-y">
                     {drillEntries.map((entry, idx) => (
                       <tr key={idx}>
-                        <td className="px-2 py-1">{formatDate(entry.created_at)}</td>
+                        <td className="px-2 py-1">
+                          {formatDate(entry.created_at)}
+                        </td>
                         <td className="px-2 py-1">{entry.txn_type}</td>
-                        <td className="px-2 py-1 text-right">{entry.quantity.toFixed(3)}</td>
-                        <td className="px-2 py-1">{entry.direction === 1 ? "In" : "Out"}</td>
-                        <td className="px-2 py-1 text-xs">{entry.reference_type} ({entry.reference_id?.slice(0,8)})</td>
-                        <td className="px-2 py-1 text-xs text-gray-500">{entry.notes}</td>
+                        <td className="px-2 py-1 text-right">
+                          {entry.quantity.toFixed(3)}
+                        </td>
+                        <td className="px-2 py-1">
+                          {entry.direction === 1 ? "In" : "Out"}
+                        </td>
+                        <td className="px-2 py-1 text-xs">
+                          {entry.reference_type} (
+                          {entry.reference_id?.slice(0, 8)})
+                        </td>
+                        <td className="px-2 py-1 text-xs text-gray-500">
+                          {entry.notes}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
