@@ -31,7 +31,7 @@ type PendingTransfer = {
   product_id: string;
   product_name: string;
   product_code: string;
-  quantity: number;        // always KG
+  quantity: number;
   uom: string;
 };
 
@@ -43,9 +43,19 @@ type SortDir = "asc" | "desc";
 
 export default function MaterialStorePage() {
   const supabase = createClient();
-  const [selectedMonth, setSelectedMonth] = useState(
-    new Date().toISOString().slice(0, 7)
-  );
+
+  // Date range – default to current month
+  const today = new Date();
+  const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
+    .toISOString()
+    .slice(0, 10);
+  const lastDayOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0)
+    .toISOString()
+    .slice(0, 10);
+
+  const [startDate, setStartDate] = useState(firstDayOfMonth);
+  const [endDate, setEndDate] = useState(lastDayOfMonth);
+
   const [movements, setMovements] = useState<MaterialStockMovement[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -79,14 +89,25 @@ export default function MaterialStorePage() {
   const [issueQtyBags, setIssueQtyBags] = useState("");
   const [issuing, setIssuing] = useState(false);
 
-  // ── Fetch monthly movements ─────────────────────────────────
+  // ── Fetch movements for date range ──────────────────────────
   const fetchMovements = async () => {
     setLoading(true);
-    const monthStart = selectedMonth + "-01";
-    const nextMonth = new Date(monthStart);
-    nextMonth.setMonth(nextMonth.getMonth() + 1);
-    const monthEnd = nextMonth.toISOString().slice(0, 7) + "-01";
 
+    // Ensure start <= end
+    const start = startDate;
+    const end = endDate;
+    if (!start || !end || start > end) {
+      setMovements([]);
+      setLoading(false);
+      return;
+    }
+
+    // Use start date as the boundary, and include the whole end day by using endDate + 1 day
+    const endDateInclusive = new Date(end);
+    endDateInclusive.setDate(endDateInclusive.getDate() + 1);
+    const endDateStr = endDateInclusive.toISOString().slice(0, 10);
+
+    // 1. Get all products that ever appeared in material_store
     const { data: allProducts, error: prodErr } = await supabase
       .from("stock_ledger")
       .select("product_id, products( code, name, category, uom, reorder_level, conversion_kg )")
@@ -119,34 +140,34 @@ export default function MaterialStorePage() {
     }
     const items = Array.from(uniqueMap.values());
 
-    // Opening balances (before month start)
+    // 2. Opening balance = sum of all movements before start date
     for (const item of items) {
       const { data: before } = await supabase
         .from("stock_ledger")
         .select("quantity, direction")
         .eq("product_id", item.product_id)
         .eq("store", "material_store")
-        .lt("created_at", monthStart);
+        .lt("created_at", start);
       const opening = (before || []).reduce((sum, r) => sum + r.quantity * r.direction, 0);
       item.opening_kg = opening;
     }
 
-    // Current month movements
+    // 3. Movements within the range [start, end)
     for (const item of items) {
-      const { data: monthData } = await supabase
+      const { data: rangeData } = await supabase
         .from("stock_ledger")
         .select("quantity, direction, txn_type, reference_type")
         .eq("product_id", item.product_id)
         .eq("store", "material_store")
-        .gte("created_at", monthStart)
-        .lt("created_at", monthEnd);
+        .gte("created_at", start)
+        .lt("created_at", endDateStr);
 
       let supplier = 0, rc = 0, wip = 0;
-      for (const r of (monthData || [])) {
+      for (const r of (rangeData || [])) {
         if (r.direction === 1) {
           if (r.reference_type === "gate_pass") supplier += r.quantity;
           else if (r.reference_type === "store_transfer") rc += r.quantity;
-          else supplier += r.quantity; // fallback
+          else supplier += r.quantity;
         } else if (r.direction === -1) {
           if (r.reference_type === "store_transfer") wip += r.quantity;
           else wip += r.quantity;
@@ -158,7 +179,7 @@ export default function MaterialStorePage() {
       item.closing_kg = item.opening_kg + supplier + rc - wip;
     }
 
-    // Filter to Raw Material and Chemical only
+    // Filter to Raw Material and Chemical categories only
     const filteredItems = items.filter(
       i => i.category === "Raw Material" || i.category === "Chemical"
     );
@@ -182,7 +203,7 @@ export default function MaterialStorePage() {
         product_id: r.product_id,
         product_name: r.products?.name ?? "",
         product_code: r.products?.code ?? "",
-        quantity: r.quantity,   // stored as KG
+        quantity: r.quantity,
         uom: r.uom,
       })));
     }
@@ -191,7 +212,7 @@ export default function MaterialStorePage() {
   useEffect(() => {
     fetchMovements();
     fetchIncoming();
-  }, [selectedMonth]);
+  }, [startDate, endDate]);   // re‑fetch whenever dates change
 
   // ── Filtering & sorting ─────────────────────────────────────
   const filtered = useMemo(() => {
@@ -240,7 +261,6 @@ export default function MaterialStorePage() {
     );
   };
 
-  // ── Toggle column visibility ────────────────────────────────
   const toggleColumn = (key: keyof typeof visibleColumns) => {
     setVisibleColumns(prev => ({ ...prev, [key]: !prev[key] }));
   };
@@ -298,7 +318,7 @@ export default function MaterialStorePage() {
         from_store: "material_store",
         to_store: "wip",
         product_id: issueItem.product_id,
-        quantity: qtyKg,            // always KG
+        quantity: qtyKg,
         uom: issueItem.uom,
         status: "pending",
         notes: `Issue to WIP – ${issueItem.name}`,
@@ -315,7 +335,6 @@ export default function MaterialStorePage() {
     }
   };
 
-  // ── Sync bags ↔ kg in issue modal ──────────────────────────
   const updateIssueBags = (bagsStr: string) => {
     setIssueQtyBags(bagsStr);
     const bags = parseFloat(bagsStr);
@@ -342,7 +361,7 @@ export default function MaterialStorePage() {
     <>
       <Header
         title="Material Store (Raw Materials & Chemicals)"
-        subtitle="Monthly stock movement in KG – toggle bags if needed"
+        subtitle="Custom date‑range report – all quantities in KG"
         actions={
           <button
             className="relative btn-secondary flex items-center gap-2"
@@ -359,15 +378,22 @@ export default function MaterialStorePage() {
         }
       />
       <main className="flex-1 p-6 space-y-6 print:space-y-4">
-        {/* Controls */}
+        {/* Date range, columns, print */}
         <div className="flex items-center justify-between print:hidden">
           <div className="flex items-center gap-3">
-            <label className="text-sm font-medium">Month:</label>
+            <label className="text-sm font-medium">From:</label>
             <input
-              type="month"
+              type="date"
               className="input"
-              value={selectedMonth}
-              onChange={e => setSelectedMonth(e.target.value)}
+              value={startDate}
+              onChange={e => setStartDate(e.target.value)}
+            />
+            <label className="text-sm font-medium">To:</label>
+            <input
+              type="date"
+              className="input"
+              value={endDate}
+              onChange={e => setEndDate(e.target.value)}
             />
           </div>
           <div className="flex items-center gap-2">
@@ -410,7 +436,7 @@ export default function MaterialStorePage() {
         {/* Movement Table */}
         <section>
           <h2 className="text-lg font-semibold mb-4">
-            Stock Movement – {selectedMonth}
+            Stock Movement – {startDate} to {endDate}
           </h2>
           <div className="relative max-w-sm mb-3 print:hidden">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -426,7 +452,7 @@ export default function MaterialStorePage() {
             {loading ? (
               <div className="py-16 text-center text-gray-400">Loading…</div>
             ) : filtered.length === 0 ? (
-              <div className="py-16 text-center text-gray-400">No data.</div>
+              <div className="py-16 text-center text-gray-400">No data for the selected range.</div>
             ) : (
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
@@ -531,24 +557,16 @@ export default function MaterialStorePage() {
                           </td>
                         )}
                         {visibleColumns.received_supplier_kg && (
-                          <td className="table-td text-right">
-                            {item.received_supplier_kg.toFixed(3)}
-                          </td>
+                          <td className="table-td text-right">{item.received_supplier_kg.toFixed(3)}</td>
                         )}
                         {visibleColumns.received_rc_kg && (
-                          <td className="table-td text-right">
-                            {item.received_rc_kg.toFixed(3)}
-                          </td>
+                          <td className="table-td text-right">{item.received_rc_kg.toFixed(3)}</td>
                         )}
                         {visibleColumns.issued_wip_kg && (
-                          <td className="table-td text-right">
-                            {item.issued_wip_kg.toFixed(3)}
-                          </td>
+                          <td className="table-td text-right">{item.issued_wip_kg.toFixed(3)}</td>
                         )}
                         {visibleColumns.closing_kg && (
-                          <td className="table-td text-right font-medium">
-                            {item.closing_kg.toFixed(3)}
-                          </td>
+                          <td className="table-td text-right font-medium">{item.closing_kg.toFixed(3)}</td>
                         )}
                         {visibleColumns.closing_bags && (
                           <td className="table-td text-right font-medium">
@@ -642,7 +660,6 @@ export default function MaterialStorePage() {
                 Available (closing): {issueItem.closing_kg.toFixed(3)} kg
               </p>
 
-              {/* KG input (primary) */}
               <div>
                 <label className="label">Quantity (KG)</label>
                 <input
@@ -656,7 +673,6 @@ export default function MaterialStorePage() {
                 />
               </div>
 
-              {/* Bags input (only if product is bags) */}
               {issueItem.uom === "bags" && issueItem.conversion_kg != null && (
                 <div>
                   <label className="label">Bags (1 bag = {issueItem.conversion_kg} kg)</label>
