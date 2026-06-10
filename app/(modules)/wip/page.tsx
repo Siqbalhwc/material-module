@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo } from "react";
 import Header from "@/components/layout/Header";
 import {
   Search, ArrowUpDown, ArrowUp, ArrowDown, Package,
-  Send, Printer, Wrench, X
+  Send, Printer, Wrench, X, Settings2
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
