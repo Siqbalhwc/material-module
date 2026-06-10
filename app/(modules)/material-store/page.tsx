@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
 import Header from "@/components/layout/Header";
-import { Search, ArrowUpDown, ArrowUp, ArrowDown, Package, AlertTriangle, Send, Bell, X, Printer } from "lucide-react";
+import { Search, ArrowUpDown, ArrowUp, ArrowDown, Package, AlertTriangle, Send, Bell, X, Printer, Settings2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { StoreType } from "@/types";
@@ -12,12 +12,13 @@ type MaterialStockMovement = {
   name: string;
   category: string;
   uom: string;
+  conversion_kg?: number;      // from products
   reorder_level: number;
   opening: number;
-  received_supplier: number;   // from Gate Pass
-  received_rc: number;         // from RC Store
-  issued_wip: number;          // to WIP
-  closing: number;
+  received_supplier: number;
+  received_rc: number;
+  issued_wip: number;
+  closing: number;             // closing in base UOM
 };
 
 type PendingTransfer = {
@@ -35,13 +36,27 @@ type SortDir = "asc" | "desc";
 
 export default function MaterialStorePage() {
   const supabase = createClient();
-
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
   const [movements, setMovements] = useState<MaterialStockMovement[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [sortField, setSortField] = useState<SortField>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  // Column visibility – reorder_level hidden by default
+  const [visibleColumns, setVisibleColumns] = useState({
+    code: true,
+    name: true,
+    category: true,
+    uom: true,
+    reorder_level: false,       // hidden by default
+    opening: true,
+    received_supplier: true,
+    received_rc: true,
+    issued_wip: true,
+    closing: true,
+  });
+  const [showColumnMenu, setShowColumnMenu] = useState(false);
 
   // Incoming transfers (from RC)
   const [incoming, setIncoming] = useState<PendingTransfer[]>([]);
@@ -60,10 +75,10 @@ export default function MaterialStorePage() {
     nextMonth.setMonth(nextMonth.getMonth() + 1);
     const monthEnd = nextMonth.toISOString().slice(0, 7) + "-01";
 
-    // Get all products ever in material_store
+    // Fetch products with conversion_kg included
     const { data: allProducts, error: prodErr } = await supabase
       .from("stock_ledger")
-      .select("product_id, products( code, name, category, uom, reorder_level )")
+      .select("product_id, products( code, name, category, uom, reorder_level, conversion_kg )")
       .eq("store", "material_store");
 
     if (prodErr || !allProducts) {
@@ -81,6 +96,7 @@ export default function MaterialStorePage() {
           name: (row.products as any)?.name ?? "Unknown",
           category: (row.products as any)?.category ?? "",
           uom: (row.products as any)?.uom ?? "",
+          conversion_kg: (row.products as any)?.conversion_kg ?? undefined,
           reorder_level: (row.products as any)?.reorder_level ?? 0,
           opening: 0,
           received_supplier: 0,
@@ -92,7 +108,7 @@ export default function MaterialStorePage() {
     }
     const items = Array.from(uniqueMap.values());
 
-    // Opening
+    // Opening balances
     for (const item of items) {
       const { data: before } = await supabase
         .from("stock_ledger")
@@ -104,7 +120,7 @@ export default function MaterialStorePage() {
       item.opening = opening;
     }
 
-    // Current month
+    // Current month movements
     for (const item of items) {
       const { data: monthData } = await supabase
         .from("stock_ledger")
@@ -118,10 +134,10 @@ export default function MaterialStorePage() {
       for (const r of (monthData || [])) {
         if (r.direction === 1) {
           if (r.reference_type === "gate_pass") supplier += r.quantity;
-          else if (r.reference_type === "store_transfer") rc += r.quantity; // from RC
-          else supplier += r.quantity; // fallback
+          else if (r.reference_type === "store_transfer") rc += r.quantity;
+          else supplier += r.quantity;
         } else if (r.direction === -1) {
-          if (r.reference_type === "store_transfer") wip += r.quantity; // to WIP
+          if (r.reference_type === "store_transfer") wip += r.quantity;
           else wip += r.quantity;
         }
       }
@@ -131,11 +147,16 @@ export default function MaterialStorePage() {
       item.closing = item.opening + supplier + rc - wip;
     }
 
-    setMovements(items);
+    // Filter to only Raw Material and Chemical categories
+    const filteredItems = items.filter(
+      i => i.category === "Raw Material" || i.category === "Chemical"
+    );
+
+    setMovements(filteredItems);
     setLoading(false);
   };
 
-  // ── Fetch incoming transfers (to material_store, pending) ─
+  // ── Fetch incoming transfers (from RC) ─────────────────
   const fetchIncoming = async () => {
     const { data } = await supabase
       .from("store_transfers")
@@ -225,7 +246,7 @@ export default function MaterialStorePage() {
     if (!issueItem) return;
     const qty = parseFloat(issueQty);
     if (isNaN(qty) || qty <= 0 || qty > issueItem.closing) {
-      alert("Invalid quantity (max " + issueItem.closing + ")");
+      alert(`Invalid quantity (max ${issueItem.closing.toFixed(3)} ${issueItem.uom})`);
       return;
     }
     setIssuing(true);
@@ -245,6 +266,10 @@ export default function MaterialStorePage() {
       setIssueQty("");
     } catch (e: any) { alert(e.message); }
     finally { setIssuing(false); }
+  };
+
+  const toggleColumn = (key: keyof typeof visibleColumns) => {
+    setVisibleColumns(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
   const handlePrint = () => window.print();
@@ -267,15 +292,45 @@ export default function MaterialStorePage() {
         }
       />
       <main className="flex-1 p-6 space-y-6 print:space-y-4">
-        {/* Month & Print */}
+        {/* Controls: month, columns, print */}
         <div className="flex items-center justify-between print:hidden">
           <div className="flex items-center gap-3">
             <label className="text-sm font-medium">Month:</label>
             <input type="month" className="input" value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} />
           </div>
-          <button onClick={handlePrint} className="btn-secondary flex items-center gap-1">
-            <Printer className="h-4 w-4" /> Print / PDF
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Column visibility */}
+            <div className="relative">
+              <button
+                className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 bg-white border border-gray-200 rounded-md px-2.5 py-1.5"
+                onClick={() => setShowColumnMenu(!showColumnMenu)}
+              >
+                <Settings2 className="h-3.5 w-3.5" /> Columns
+              </button>
+              {showColumnMenu && (
+                <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-md shadow-lg z-20 text-xs">
+                  <div className="p-2 space-y-1">
+                    {Object.entries(visibleColumns).map(([key, value]) => (
+                      <label key={key} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded">
+                        <input
+                          type="checkbox"
+                          checked={value}
+                          onChange={() => toggleColumn(key as keyof typeof visibleColumns)}
+                          className="rounded border-gray-300"
+                        />
+                        <span className="capitalize text-gray-600">
+                          {key === "reorder_level" ? "Reorder Level" : key.replace(/_/g, " ")}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            <button onClick={handlePrint} className="btn-secondary flex items-center gap-1">
+              <Printer className="h-4 w-4" /> Print / PDF
+            </button>
+          </div>
         </div>
 
         {/* Movement Table */}
@@ -292,32 +347,55 @@ export default function MaterialStorePage() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
-                    {(["code","name","category","uom","reorder_level","opening","received_supplier","received_rc","issued_wip","closing"] as SortField[]).map(f => (
-                      <th key={f} className={`table-th cursor-pointer ${["opening","received_supplier","received_rc","issued_wip","closing","reorder_level"].includes(f) ? "text-right" : ""}`} onClick={() => handleSort(f)}>
-                        <span className="inline-flex items-center">
-                          {f === "received_supplier" ? "Recv Supplier" : f === "received_rc" ? "Recv RC" : f === "issued_wip" ? "Issued WIP" : f === "reorder_level" ? "Reorder Lvl" : f.charAt(0).toUpperCase()+f.slice(1)}
-                          {renderSortIcon(f)}
-                        </span>
+                    {visibleColumns.code && <th className="table-th cursor-pointer" onClick={() => handleSort("code")}>Code {renderSortIcon("code")}</th>}
+                    {visibleColumns.name && <th className="table-th cursor-pointer" onClick={() => handleSort("name")}>Name {renderSortIcon("name")}</th>}
+                    {visibleColumns.category && <th className="table-th cursor-pointer" onClick={() => handleSort("category")}>Category {renderSortIcon("category")}</th>}
+                    {visibleColumns.uom && <th className="table-th cursor-pointer" onClick={() => handleSort("uom")}>UOM {renderSortIcon("uom")}</th>}
+                    {visibleColumns.reorder_level && <th className="table-th cursor-pointer text-right" onClick={() => handleSort("reorder_level")}>Reorder Lvl {renderSortIcon("reorder_level")}</th>}
+                    {visibleColumns.opening && <th className="table-th cursor-pointer text-right" onClick={() => handleSort("opening")}>Opening {renderSortIcon("opening")}</th>}
+                    {visibleColumns.received_supplier && <th className="table-th cursor-pointer text-right" onClick={() => handleSort("received_supplier")}>Recv Supplier {renderSortIcon("received_supplier")}</th>}
+                    {visibleColumns.received_rc && <th className="table-th cursor-pointer text-right" onClick={() => handleSort("received_rc")}>Recv RC {renderSortIcon("received_rc")}</th>}
+                    {visibleColumns.issued_wip && <th className="table-th cursor-pointer text-right" onClick={() => handleSort("issued_wip")}>Issued WIP {renderSortIcon("issued_wip")}</th>}
+                    {visibleColumns.closing && (
+                      <th className="table-th cursor-pointer text-right" onClick={() => handleSort("closing")}>
+                        Closing (UOM) {renderSortIcon("closing")}
                       </th>
-                    ))}
+                    )}
+                    {/* Extra KG column always visible for bag products – but we can just show it inline */}
                     <th className="table-th print:hidden"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {filtered.map(item => {
                     const lowStock = item.closing <= item.reorder_level && item.reorder_level > 0;
+                    const kgEquivalent = item.uom === "bags" && item.conversion_kg != null
+                      ? item.closing * item.conversion_kg
+                      : undefined;
                     return (
                       <tr key={item.product_id} className={cn("hover:bg-gray-50", lowStock && "bg-amber-50")}>
-                        <td className="table-td font-mono text-xs">{item.code}</td>
-                        <td className="table-td font-medium">{item.name} {lowStock && <AlertTriangle className="h-3 w-3 text-amber-500 inline ml-1" />}</td>
-                        <td className="table-td">{item.category}</td>
-                        <td className="table-td uppercase text-xs">{item.uom}</td>
-                        <td className="table-td text-right">{item.reorder_level}</td>
-                        <td className="table-td text-right">{item.opening.toFixed(3)}</td>
-                        <td className="table-td text-right">{item.received_supplier.toFixed(3)}</td>
-                        <td className="table-td text-right">{item.received_rc.toFixed(3)}</td>
-                        <td className="table-td text-right">{item.issued_wip.toFixed(3)}</td>
-                        <td className="table-td text-right font-medium">{item.closing.toFixed(3)}</td>
+                        {visibleColumns.code && <td className="table-td font-mono text-xs">{item.code}</td>}
+                        {visibleColumns.name && (
+                          <td className="table-td font-medium">
+                            {item.name}
+                            {lowStock && <AlertTriangle className="h-3 w-3 text-amber-500 inline ml-1" />}
+                          </td>
+                        )}
+                        {visibleColumns.category && <td className="table-td">{item.category}</td>}
+                        {visibleColumns.uom && <td className="table-td uppercase text-xs">{item.uom}</td>}
+                        {visibleColumns.reorder_level && <td className="table-td text-right">{item.reorder_level}</td>}
+                        {visibleColumns.opening && <td className="table-td text-right">{item.opening.toFixed(3)}</td>}
+                        {visibleColumns.received_supplier && <td className="table-td text-right">{item.received_supplier.toFixed(3)}</td>}
+                        {visibleColumns.received_rc && <td className="table-td text-right">{item.received_rc.toFixed(3)}</td>}
+                        {visibleColumns.issued_wip && <td className="table-td text-right">{item.issued_wip.toFixed(3)}</td>}
+                        {visibleColumns.closing && (
+                          <td className="table-td text-right font-medium">
+                            {item.closing.toFixed(3)}
+                            {/* Show KG equivalent only for bag items */}
+                            {kgEquivalent != null && (
+                              <span className="text-gray-500 text-xs ml-1">({kgEquivalent.toFixed(3)} kg)</span>
+                            )}
+                          </td>
+                        )}
                         <td className="table-td print:hidden">
                           <button className="text-xs text-brand-600" onClick={() => { setIssueItem(item); setIssueQty(""); }}>
                             <Send className="h-3 w-3 inline" /> Issue to WIP
@@ -360,13 +438,36 @@ export default function MaterialStorePage() {
           </div>
         )}
 
-        {/* Issue modal */}
+        {/* Issue to WIP modal */}
         {issueItem && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 print:hidden">
             <div className="bg-white rounded-xl p-6 w-96 space-y-4">
               <h2 className="text-lg font-semibold">Issue to WIP: {issueItem.name}</h2>
-              <p className="text-sm text-gray-500">Available (closing): {issueItem.closing.toFixed(3)} {issueItem.uom}</p>
-              <input type="number" step="0.001" max={issueItem.closing} className="input" value={issueQty} onChange={e => setIssueQty(e.target.value)} />
+              <p className="text-sm text-gray-500">
+                Available (closing): {issueItem.closing.toFixed(3)} {issueItem.uom}
+                {issueItem.uom === "bags" && issueItem.conversion_kg != null && (
+                  <span className="ml-1 text-gray-500">
+                    (≈ {(issueItem.closing * issueItem.conversion_kg).toFixed(3)} kg)
+                  </span>
+                )}
+              </p>
+              <div>
+                <label className="label">Quantity to issue ({issueItem.uom})</label>
+                <input
+                  type="number"
+                  step="0.001"
+                  min="0"
+                  max={issueItem.closing}
+                  className="input"
+                  value={issueQty}
+                  onChange={e => setIssueQty(e.target.value)}
+                />
+                {issueItem.uom === "bags" && issueItem.conversion_kg != null && issueQty && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    {issueQty} bags = {(parseFloat(issueQty) * issueItem.conversion_kg).toFixed(3)} kg
+                  </p>
+                )}
+              </div>
               <div className="flex justify-end gap-2">
                 <button className="btn-secondary" onClick={() => setIssueItem(null)}>Cancel</button>
                 <button className="btn-primary" disabled={issuing} onClick={handleIssueToWIP}>Send</button>
