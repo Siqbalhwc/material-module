@@ -20,6 +20,9 @@ async function isAuthorised(userId: string) {
   return data && data.length > 0
 }
 
+// Type for cookie objects returned by Supabase SSR
+type CookieOption = { name: string; value: string; options?: Record<string, unknown> }
+
 export async function POST(request: Request) {
   const cookieStore = await cookies()
   const supabase = createServerClient(
@@ -28,7 +31,7 @@ export async function POST(request: Request) {
     {
       cookies: {
         getAll() { return cookieStore.getAll() },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: CookieOption[]) {
           cookiesToSet.forEach(({ name, value, options }) =>
             cookieStore.set(name, value, options)
           )
@@ -84,7 +87,7 @@ export async function GET() {
     {
       cookies: {
         getAll() { return cookieStore.getAll() },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: CookieOption[]) {
           cookiesToSet.forEach(({ name, value, options }) =>
             cookieStore.set(name, value, options)
           )
