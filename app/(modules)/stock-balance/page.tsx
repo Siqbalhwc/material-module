@@ -22,14 +22,14 @@ type ProductPosition = {
   uom: string;
   category: string;
   opening: number;
-  inflows: number;
-  material_used: number;       // raw material consumed in production runs
+  inflows: number;              // only external (gate pass) receipts
+  material_consumed: number;
   stores: StoreClosing;
   totalClosing: number;
 };
 
 type SortField =
-  "code" | "name" | "uom" | "opening" | "inflows" | "material_used" | "totalClosing";
+  "code" | "name" | "uom" | "opening" | "inflows" | "material_consumed" | "totalClosing";
 type SortDir = "asc" | "desc";
 
 const STORE_LABELS: Record<keyof StoreClosing, string> = {
@@ -65,7 +65,7 @@ export default function StockPositionPage() {
     uom: true,
     opening: true,
     inflows: true,
-    material_used: true,
+    material_consumed: true,
     material_store: true,
     wip: true,
     rc_store: true,
@@ -94,7 +94,7 @@ export default function StockPositionPage() {
     endInclusive.setDate(endInclusive.getDate() + 1);
     const end = endInclusive.toISOString().slice(0, 10);
 
-    // 1. Fetch raw material consumption from production runs (only executed/verified runs)
+    // 1. Raw material consumed in production runs
     const { data: productionData, error: prodRunErr } = await supabase
       .from("production_runs")
       .select("raw_material_product_id, kg_consumed")
@@ -102,7 +102,6 @@ export default function StockPositionPage() {
       .lt("created_at", end)
       .in("status", ["executed", "verified"]);
 
-    // Build a map: raw_material_product_id -> total consumed
     const consumptionMap = new Map<string, number>();
     if (!prodRunErr && productionData) {
       for (const row of productionData) {
@@ -111,7 +110,7 @@ export default function StockPositionPage() {
       }
     }
 
-    // 2. Fetch all products that have ever appeared in stock_ledger
+    // 2. All products that have ever appeared in stock_ledger
     const { data: allProducts, error: prodErr } = await supabase
       .from("stock_ledger")
       .select("product_id, products( code, name, category, uom, conversion_kg )");
@@ -138,7 +137,7 @@ export default function StockPositionPage() {
           category: cat,
           opening: 0,
           inflows: 0,
-          material_used: 0,
+          material_consumed: 0,
           stores: {
             material_store: 0,
             wip: 0,
@@ -153,7 +152,7 @@ export default function StockPositionPage() {
 
     const items = Array.from(uniqueMap.values());
 
-    // 3. Opening balances (before start)
+    // 3. Opening balances
     for (const item of items) {
       let totalOpening = 0;
       for (const store of storeKeys) {
@@ -172,16 +171,16 @@ export default function StockPositionPage() {
       item.opening = totalOpening;
     }
 
-    // 4. Movements within the date range
+    // 4. Movements within the date range – compute store closings and separate inflows
     for (const item of items) {
       const { data: rangeData } = await supabase
         .from("stock_ledger")
-        .select("quantity, direction, store")
+        .select("quantity, direction, store, reference_type")
         .eq("product_id", item.product_id)
         .gte("created_at", start)
         .lt("created_at", end);
 
-      let totalInflows = 0;
+      let externalInflows = 0;
       const storeMovements: Record<string, { in: number; out: number }> = {};
       for (const store of storeKeys) {
         storeMovements[store] = { in: 0, out: 0 };
@@ -192,14 +191,17 @@ export default function StockPositionPage() {
         if (storeMovements[store]) {
           if (r.direction === 1) {
             storeMovements[store].in += r.quantity;
-            totalInflows += r.quantity;
+            // Only count gate_pass as external inflow
+            if (r.reference_type === "gate_pass") {
+              externalInflows += r.quantity;
+            }
           } else if (r.direction === -1) {
             storeMovements[store].out += r.quantity;
           }
         }
       }
 
-      item.inflows = totalInflows;
+      item.inflows = externalInflows;
 
       for (const store of storeKeys) {
         const opening = (item as any)[`_opening_${store}`] || 0;
@@ -208,14 +210,14 @@ export default function StockPositionPage() {
       }
     }
 
-    // 5. Set material_used from production runs
+    // 5. Material consumed from production runs
     for (const item of items) {
-      item.material_used = consumptionMap.get(item.product_id) || 0;
+      item.material_consumed = consumptionMap.get(item.product_id) || 0;
     }
 
-    // 6. Compute totalClosing
+    // 6. Total closing = opening + inflows - material consumed
     for (const item of items) {
-      item.totalClosing = item.opening + item.inflows - item.material_used;
+      item.totalClosing = item.opening + item.inflows - item.material_consumed;
     }
 
     setPositions(items);
@@ -243,7 +245,7 @@ export default function StockPositionPage() {
         case "uom": valA = a.uom; valB = b.uom; break;
         case "opening": valA = a.opening; valB = b.opening; break;
         case "inflows": valA = a.inflows; valB = b.inflows; break;
-        case "material_used": valA = a.material_used; valB = b.material_used; break;
+        case "material_consumed": valA = a.material_consumed; valB = b.material_consumed; break;
         case "totalClosing": valA = a.totalClosing; valB = b.totalClosing; break;
         default: return 0;
       }
@@ -318,7 +320,7 @@ export default function StockPositionPage() {
     <>
       <Header
         title="Stock Position"
-        subtitle="Opening + Inflows – Material Consumed = Total Closing"
+        subtitle="Opening + Inflows (Gate Pass) – Material Consumed = Total Closing"
       />
       <main className="flex-1 p-6 space-y-6 print:space-y-4">
         {/* Controls */}
@@ -364,7 +366,7 @@ export default function StockPositionPage() {
                           className="rounded border-gray-300"
                         />
                         <span className="capitalize text-gray-600">
-                          {key === "material_used"
+                          {key === "material_consumed"
                             ? "Material Consumed"
                             : key === "totalClosing"
                             ? "Total Closing"
@@ -449,12 +451,12 @@ export default function StockPositionPage() {
                           Inflows (KG) {renderSortIcon("inflows")}
                         </th>
                       )}
-                      {visibleColumns.material_used && (
+                      {visibleColumns.material_consumed && (
                         <th
                           className="table-th cursor-pointer text-right"
-                          onClick={() => handleSort("material_used")}
+                          onClick={() => handleSort("material_consumed")}
                         >
-                          Material Consumed (KG) {renderSortIcon("material_used")}
+                          Material Consumed (KG) {renderSortIcon("material_consumed")}
                         </th>
                       )}
                       {visibleColumns.material_store && (
@@ -519,9 +521,9 @@ export default function StockPositionPage() {
                             {item.inflows.toFixed(3)}
                           </td>
                         )}
-                        {visibleColumns.material_used && (
+                        {visibleColumns.material_consumed && (
                           <td className="table-td text-right">
-                            {item.material_used.toFixed(3)}
+                            {item.material_consumed.toFixed(3)}
                           </td>
                         )}
                         {visibleColumns.material_store && (
