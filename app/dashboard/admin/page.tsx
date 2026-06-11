@@ -33,40 +33,45 @@ export default function AdminPage() {
   // Check if current user is super_admin or admin
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) return;
+      if (!user) {
+        console.log("No user");
+        return;
+      }
       supabase
         .from("user_roles")
         .select("role")
         .eq("user_id", user.id)
-        .then(({ data }) => {
+        .then(({ data, error }) => {
+          console.log("roles data:", data, "error:", error);
           const authorised =
             data?.some(
               r => r.role === "super_admin" || r.role === "admin"
             ) ?? false;
+          console.log("isAuthorised:", authorised);
           setIsAuthorised(authorised);
         });
     });
   }, []);
 
   const fetchUsers = async () => {
-  setLoading(true);
-  try {
-    const res = await fetch("/api/users");
-    if (!res.ok) {
-      console.error("API error:", res.status, await res.text());
-      setError(`Failed to load users (status ${res.status})`);
-      setUsers([]);
-      setLoading(false);
-      return;
+    setLoading(true);
+    try {
+      const res = await fetch("/api/users");
+      if (!res.ok) {
+        console.error("API error:", res.status, await res.text());
+        setError(`Failed to load users (status ${res.status})`);
+        setUsers([]);
+        setLoading(false);
+        return;
+      }
+      const data = await res.json();
+      setUsers(Array.isArray(data) ? data : []);
+    } catch (err: any) {
+      console.error("Fetch users failed:", err);
+      setError(err.message || "Network error");
     }
-    const data = await res.json();
-    setUsers(Array.isArray(data) ? data : []);
-  } catch (err: any) {
-    console.error("Fetch users failed:", err);
-    setError(err.message || "Network error");
-  }
-  setLoading(false);
-};
+    setLoading(false);
+  };
 
   useEffect(() => {
     if (isAuthorised) fetchUsers();
