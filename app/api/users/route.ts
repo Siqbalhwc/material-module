@@ -9,6 +9,16 @@ const supabaseAdmin = createClient(
   { auth: { persistSession: false, autoRefreshToken: false } }
 )
 
+// Helper to check if user is admin or super_admin
+async function isAuthorised(userId: string) {
+  const { data } = await supabaseAdmin
+    .from('user_roles')
+    .select('role')
+    .eq('user_id', userId)
+    .in('role', ['admin', 'super_admin'])
+  return data && data.length > 0
+}
+
 export async function POST(request: Request) {
   const cookieStore = await cookies()
   const supabase = createServerClient(
@@ -29,13 +39,9 @@ export async function POST(request: Request) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { data: isAdmin } = await supabaseAdmin
-    .from('user_roles')
-    .select('id')
-    .eq('user_id', user.id)
-    .eq('role', 'admin')
-    .maybeSingle()
-  if (!isAdmin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!(await isAuthorised(user.id))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const { email, password, fullName, roles } = await request.json()
   if (!email || !password) {
@@ -88,6 +94,10 @@ export async function GET() {
 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  if (!(await isAuthorised(user.id))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
 
   const { data: users } = await supabaseAdmin.auth.admin.listUsers()
   const { data: allRoles } = await supabaseAdmin.from('user_roles').select('*')
