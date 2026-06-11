@@ -9,13 +9,14 @@ const supabaseAdmin = createClient(
   { auth: { persistSession: false, autoRefreshToken: false } }
 )
 
-// Helper to check if user is admin or super_admin
+// Allow both admin and super_admin
 async function isAuthorised(userId: string) {
   const { data } = await supabaseAdmin
     .from('user_roles')
-    .select('role')
+    .select('id')
     .eq('user_id', userId)
     .in('role', ['admin', 'super_admin'])
+    .limit(1)
   return data && data.length > 0
 }
 
@@ -27,7 +28,7 @@ export async function POST(request: Request) {
     {
       cookies: {
         getAll() { return cookieStore.getAll() },
-        setAll(cookiesToSet: Array<{ name: string; value: string; options?: Record<string, unknown> }>) {
+        setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value, options }) =>
             cookieStore.set(name, value, options)
           )
@@ -83,7 +84,7 @@ export async function GET() {
     {
       cookies: {
         getAll() { return cookieStore.getAll() },
-        setAll(cookiesToSet: Array<{ name: string; value: string; options?: Record<string, unknown> }>) {
+        setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value, options }) =>
             cookieStore.set(name, value, options)
           )
