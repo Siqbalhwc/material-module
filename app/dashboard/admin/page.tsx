@@ -49,12 +49,24 @@ export default function AdminPage() {
   }, []);
 
   const fetchUsers = async () => {
-    setLoading(true);
+  setLoading(true);
+  try {
     const res = await fetch("/api/users");
+    if (!res.ok) {
+      console.error("API error:", res.status, await res.text());
+      setError(`Failed to load users (status ${res.status})`);
+      setUsers([]);
+      setLoading(false);
+      return;
+    }
     const data = await res.json();
     setUsers(Array.isArray(data) ? data : []);
-    setLoading(false);
-  };
+  } catch (err: any) {
+    console.error("Fetch users failed:", err);
+    setError(err.message || "Network error");
+  }
+  setLoading(false);
+};
 
   useEffect(() => {
     if (isAuthorised) fetchUsers();
