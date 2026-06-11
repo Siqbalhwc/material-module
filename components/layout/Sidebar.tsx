@@ -50,16 +50,16 @@ export default function Sidebar() {
     };
 
     const checkAdmin = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", user.id)
-        .in("role", ["admin", "super_admin"])
-        .maybeSingle();
-      setIsAdmin(!!data);
-    };
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
+  const { data } = await supabase
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", user.id)
+    .in("role", ["admin", "super_admin"])
+    .limit(1);
+  setIsAdmin(!!(data && data.length > 0));
+};
 
     fetchSettings();
     checkAdmin();
