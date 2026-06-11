@@ -22,14 +22,13 @@ type ProductPosition = {
   uom: string;
   category: string;
   opening: number;
-  inflows: number;               // only external gate pass receipts
-  material_consumed: number;     // kg_consumed – kg_waste (net converted to FG)
+  inflows: number;
+  material_consumed: number;
   stores: StoreClosing;
-  totalClosing: number;
 };
 
 type SortField =
-  "code" | "name" | "uom" | "opening" | "inflows" | "material_consumed" | "totalClosing";
+  "code" | "name" | "uom" | "opening" | "inflows" | "material_consumed";
 type SortDir = "asc" | "desc";
 
 const STORE_LABELS: Record<keyof StoreClosing, string> = {
@@ -71,7 +70,7 @@ export default function StockPositionPage() {
     rc_store: true,
     finished_goods: true,
     parts_store: false,
-    totalClosing: true,
+    reconciled: true,
   });
   const [showColumnMenu, setShowColumnMenu] = useState(false);
 
@@ -102,13 +101,12 @@ export default function StockPositionPage() {
       .lt("created_at", end)
       .in("status", ["executed", "verified"]);
 
-    // net consumed = total kg_consumed – total kg_waste per raw material
     const netConsumedMap = new Map<string, number>();
     if (!prodRunErr && prodRuns) {
       for (const row of prodRuns) {
-        const prevConsumed = netConsumedMap.get(row.raw_material_product_id) || 0;
+        const prev = netConsumedMap.get(row.raw_material_product_id) || 0;
         const net = Number(row.kg_consumed) - Number(row.kg_waste);
-        netConsumedMap.set(row.raw_material_product_id, prevConsumed + net);
+        netConsumedMap.set(row.raw_material_product_id, prev + net);
       }
     }
 
@@ -131,6 +129,9 @@ export default function StockPositionPage() {
     for (const row of allProducts) {
       if (!uniqueMap.has(row.product_id)) {
         const cat = (row.products as any)?.category ?? "";
+        // Only include Raw Material and Chemical
+        if (cat !== "Raw Material" && cat !== "Chemical") continue;
+
         uniqueMap.set(row.product_id, {
           product_id: row.product_id,
           code: (row.products as any)?.code ?? "",
@@ -147,14 +148,13 @@ export default function StockPositionPage() {
             finished_goods: 0,
             parts_store: 0,
           },
-          totalClosing: 0,
         });
       }
     }
 
     const items = Array.from(uniqueMap.values());
 
-    // 3. Opening balances (before start)
+    // 3. Opening balances
     for (const item of items) {
       let totalOpening = 0;
       for (const store of storeKeys) {
@@ -173,7 +173,7 @@ export default function StockPositionPage() {
       item.opening = totalOpening;
     }
 
-    // 4. Movements within the date range – compute store closings and external inflows
+    // 4. Movements within the date range
     for (const item of items) {
       const { data: rangeData } = await supabase
         .from("stock_ledger")
@@ -212,14 +212,9 @@ export default function StockPositionPage() {
       }
     }
 
-    // 5. Set material_consumed = net kg consumed (total kg_consumed – kg_waste)
+    // 5. Set material_consumed = net kg consumed
     for (const item of items) {
       item.material_consumed = netConsumedMap.get(item.product_id) || 0;
-    }
-
-    // 6. Total closing = opening + inflows – material_consumed
-    for (const item of items) {
-      item.totalClosing = item.opening + item.inflows - item.material_consumed;
     }
 
     setPositions(items);
@@ -248,7 +243,6 @@ export default function StockPositionPage() {
         case "opening": valA = a.opening; valB = b.opening; break;
         case "inflows": valA = a.inflows; valB = b.inflows; break;
         case "material_consumed": valA = a.material_consumed; valB = b.material_consumed; break;
-        case "totalClosing": valA = a.totalClosing; valB = b.totalClosing; break;
         default: return 0;
       }
       if (typeof valA === "string")
@@ -322,7 +316,7 @@ export default function StockPositionPage() {
     <>
       <Header
         title="Stock Position"
-        subtitle="Opening + Inflows – Material Consumed (net of waste) = Total Closing"
+        subtitle="Opening + Inflows – Material Consumed = Store Closings"
       />
       <main className="flex-1 p-6 space-y-6 print:space-y-4">
         {/* Controls */}
@@ -370,8 +364,8 @@ export default function StockPositionPage() {
                         <span className="capitalize text-gray-600">
                           {key === "material_consumed"
                             ? "Mat. Consumed (net)"
-                            : key === "totalClosing"
-                            ? "Total Closing"
+                            : key === "reconciled"
+                            ? "Reconciled?"
                             : key.replace(/_/g, " ")}
                         </span>
                       </label>
@@ -458,7 +452,7 @@ export default function StockPositionPage() {
                           className="table-th cursor-pointer text-right"
                           onClick={() => handleSort("material_consumed")}
                         >
-                          Mat. Consumed (net KG) {renderSortIcon("material_consumed")}
+                          Mat. Consumed (net) {renderSortIcon("material_consumed")}
                         </th>
                       )}
                       {visibleColumns.material_store && (
@@ -482,105 +476,119 @@ export default function StockPositionPage() {
                           Parts Store (KG)
                         </th>
                       )}
-                      {visibleColumns.totalClosing && (
-                        <th
-                          className="table-th cursor-pointer text-right"
-                          onClick={() => handleSort("totalClosing")}
-                        >
-                          Total Closing (KG) {renderSortIcon("totalClosing")}
+                      {visibleColumns.reconciled && (
+                        <th className="table-th text-center">
+                          Reconciled?
                         </th>
                       )}
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {filtered.map(item => (
-                      <tr
-                        key={item.product_id}
-                        className="hover:bg-gray-50"
-                      >
-                        {visibleColumns.code && (
-                          <td className="table-td font-mono text-xs">
-                            {item.code}
-                          </td>
-                        )}
-                        {visibleColumns.name && (
-                          <td className="table-td font-medium">
-                            {item.name}
-                          </td>
-                        )}
-                        {visibleColumns.uom && (
-                          <td className="table-td uppercase text-xs">
-                            {item.uom}
-                          </td>
-                        )}
-                        {visibleColumns.opening && (
-                          <td className="table-td text-right">
-                            {item.opening.toFixed(3)}
-                          </td>
-                        )}
-                        {visibleColumns.inflows && (
-                          <td className="table-td text-right">
-                            {item.inflows.toFixed(3)}
-                          </td>
-                        )}
-                        {visibleColumns.material_consumed && (
-                          <td className="table-td text-right">
-                            {item.material_consumed.toFixed(3)}
-                          </td>
-                        )}
-                        {visibleColumns.material_store && (
-                          <td
-                            className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
-                            onClick={() =>
-                              openDrillDown(item, "material_store")
-                            }
-                          >
-                            {item.stores.material_store.toFixed(3)}
-                          </td>
-                        )}
-                        {visibleColumns.wip && (
-                          <td
-                            className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
-                            onClick={() => openDrillDown(item, "wip")}
-                          >
-                            {item.stores.wip.toFixed(3)}
-                          </td>
-                        )}
-                        {visibleColumns.rc_store && (
-                          <td
-                            className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
-                            onClick={() => openDrillDown(item, "rc_store")}
-                          >
-                            {item.stores.rc_store.toFixed(3)}
-                          </td>
-                        )}
-                        {visibleColumns.finished_goods && (
-                          <td
-                            className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
-                            onClick={() =>
-                              openDrillDown(item, "finished_goods")
-                            }
-                          >
-                            {item.stores.finished_goods.toFixed(3)}
-                          </td>
-                        )}
-                        {visibleColumns.parts_store && (
-                          <td
-                            className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
-                            onClick={() =>
-                              openDrillDown(item, "parts_store")
-                            }
-                          >
-                            {item.stores.parts_store.toFixed(3)}
-                          </td>
-                        )}
-                        {visibleColumns.totalClosing && (
-                          <td className="table-td text-right font-medium">
-                            {item.totalClosing.toFixed(3)}
-                          </td>
-                        )}
-                      </tr>
-                    ))}
+                    {filtered.map(item => {
+                      const sumStores =
+                        item.stores.material_store +
+                        item.stores.wip +
+                        item.stores.rc_store +
+                        item.stores.finished_goods +
+                        item.stores.parts_store;
+                      const diff = Math.abs(item.opening + item.inflows - item.material_consumed - sumStores);
+                      const reconciled = diff < 0.001;
+
+                      return (
+                        <tr
+                          key={item.product_id}
+                          className="hover:bg-gray-50"
+                        >
+                          {visibleColumns.code && (
+                            <td className="table-td font-mono text-xs">
+                              {item.code}
+                            </td>
+                          )}
+                          {visibleColumns.name && (
+                            <td className="table-td font-medium">
+                              {item.name}
+                            </td>
+                          )}
+                          {visibleColumns.uom && (
+                            <td className="table-td uppercase text-xs">
+                              {item.uom}
+                            </td>
+                          )}
+                          {visibleColumns.opening && (
+                            <td className="table-td text-right">
+                              {item.opening.toFixed(3)}
+                            </td>
+                          )}
+                          {visibleColumns.inflows && (
+                            <td className="table-td text-right">
+                              {item.inflows.toFixed(3)}
+                            </td>
+                          )}
+                          {visibleColumns.material_consumed && (
+                            <td className="table-td text-right">
+                              {item.material_consumed.toFixed(3)}
+                            </td>
+                          )}
+                          {visibleColumns.material_store && (
+                            <td
+                              className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
+                              onClick={() =>
+                                openDrillDown(item, "material_store")
+                              }
+                            >
+                              {item.stores.material_store.toFixed(3)}
+                            </td>
+                          )}
+                          {visibleColumns.wip && (
+                            <td
+                              className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
+                              onClick={() => openDrillDown(item, "wip")}
+                            >
+                              {item.stores.wip.toFixed(3)}
+                            </td>
+                          )}
+                          {visibleColumns.rc_store && (
+                            <td
+                              className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
+                              onClick={() => openDrillDown(item, "rc_store")}
+                            >
+                              {item.stores.rc_store.toFixed(3)}
+                            </td>
+                          )}
+                          {visibleColumns.finished_goods && (
+                            <td
+                              className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
+                              onClick={() =>
+                                openDrillDown(item, "finished_goods")
+                              }
+                            >
+                              {item.stores.finished_goods.toFixed(3)}
+                            </td>
+                          )}
+                          {visibleColumns.parts_store && (
+                            <td
+                              className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline"
+                              onClick={() =>
+                                openDrillDown(item, "parts_store")
+                              }
+                            >
+                              {item.stores.parts_store.toFixed(3)}
+                            </td>
+                          )}
+                          {visibleColumns.reconciled && (
+                            <td className="table-td text-center">
+                              {reconciled ? (
+                                <span className="text-green-600 font-medium">✅ Yes</span>
+                              ) : (
+                                <span className="text-red-600 font-medium">
+                                  ⚠ {diff.toFixed(3)} kg
+                                </span>
+                              )}
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
