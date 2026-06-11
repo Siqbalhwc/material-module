@@ -22,8 +22,8 @@ type ProductPosition = {
   uom: string;
   category: string;
   opening: number;
-  inflows: number;              // only external (gate pass) receipts
-  material_consumed: number;
+  inflows: number;               // only external gate pass receipts
+  material_consumed: number;     // kg_consumed – kg_waste (net converted to FG)
   stores: StoreClosing;
   totalClosing: number;
 };
@@ -94,19 +94,21 @@ export default function StockPositionPage() {
     endInclusive.setDate(endInclusive.getDate() + 1);
     const end = endInclusive.toISOString().slice(0, 10);
 
-    // 1. Raw material consumed in production runs
-    const { data: productionData, error: prodRunErr } = await supabase
+    // 1. Fetch production runs to compute net material consumed
+    const { data: prodRuns, error: prodRunErr } = await supabase
       .from("production_runs")
-      .select("raw_material_product_id, kg_consumed")
+      .select("raw_material_product_id, kg_consumed, kg_waste")
       .gte("created_at", start)
       .lt("created_at", end)
       .in("status", ["executed", "verified"]);
 
-    const consumptionMap = new Map<string, number>();
-    if (!prodRunErr && productionData) {
-      for (const row of productionData) {
-        const prev = consumptionMap.get(row.raw_material_product_id) || 0;
-        consumptionMap.set(row.raw_material_product_id, prev + Number(row.kg_consumed));
+    // net consumed = total kg_consumed – total kg_waste per raw material
+    const netConsumedMap = new Map<string, number>();
+    if (!prodRunErr && prodRuns) {
+      for (const row of prodRuns) {
+        const prevConsumed = netConsumedMap.get(row.raw_material_product_id) || 0;
+        const net = Number(row.kg_consumed) - Number(row.kg_waste);
+        netConsumedMap.set(row.raw_material_product_id, prevConsumed + net);
       }
     }
 
@@ -152,7 +154,7 @@ export default function StockPositionPage() {
 
     const items = Array.from(uniqueMap.values());
 
-    // 3. Opening balances
+    // 3. Opening balances (before start)
     for (const item of items) {
       let totalOpening = 0;
       for (const store of storeKeys) {
@@ -171,7 +173,7 @@ export default function StockPositionPage() {
       item.opening = totalOpening;
     }
 
-    // 4. Movements within the date range – compute store closings and separate inflows
+    // 4. Movements within the date range – compute store closings and external inflows
     for (const item of items) {
       const { data: rangeData } = await supabase
         .from("stock_ledger")
@@ -210,12 +212,12 @@ export default function StockPositionPage() {
       }
     }
 
-    // 5. Material consumed from production runs
+    // 5. Set material_consumed = net kg consumed (total kg_consumed – kg_waste)
     for (const item of items) {
-      item.material_consumed = consumptionMap.get(item.product_id) || 0;
+      item.material_consumed = netConsumedMap.get(item.product_id) || 0;
     }
 
-    // 6. Total closing = opening + inflows - material consumed
+    // 6. Total closing = opening + inflows – material_consumed
     for (const item of items) {
       item.totalClosing = item.opening + item.inflows - item.material_consumed;
     }
@@ -320,7 +322,7 @@ export default function StockPositionPage() {
     <>
       <Header
         title="Stock Position"
-        subtitle="Opening + Inflows (Gate Pass) – Material Consumed = Total Closing"
+        subtitle="Opening + Inflows – Material Consumed (net of waste) = Total Closing"
       />
       <main className="flex-1 p-6 space-y-6 print:space-y-4">
         {/* Controls */}
@@ -367,7 +369,7 @@ export default function StockPositionPage() {
                         />
                         <span className="capitalize text-gray-600">
                           {key === "material_consumed"
-                            ? "Material Consumed"
+                            ? "Mat. Consumed (net)"
                             : key === "totalClosing"
                             ? "Total Closing"
                             : key.replace(/_/g, " ")}
@@ -456,7 +458,7 @@ export default function StockPositionPage() {
                           className="table-th cursor-pointer text-right"
                           onClick={() => handleSort("material_consumed")}
                         >
-                          Material Consumed (KG) {renderSortIcon("material_consumed")}
+                          Mat. Consumed (net KG) {renderSortIcon("material_consumed")}
                         </th>
                       )}
                       {visibleColumns.material_store && (
