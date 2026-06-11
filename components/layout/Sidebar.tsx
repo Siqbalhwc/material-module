@@ -56,7 +56,7 @@ export default function Sidebar() {
         .from("user_roles")
         .select("role")
         .eq("user_id", user.id)
-        .eq("role", "admin")
+        .in("role", ["admin", "super_admin"])
         .maybeSingle();
       setIsAdmin(!!data);
     };
