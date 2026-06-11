@@ -9,7 +9,9 @@ const supabaseAdmin = createClient(
   { auth: { persistSession: false, autoRefreshToken: false } }
 )
 
-// Allow both admin and super_admin
+type CookieOption = { name: string; value: string; options?: Record<string, unknown> }
+
+// Helper to check if user is admin or super_admin
 async function isAuthorised(userId: string) {
   const { data } = await supabaseAdmin
     .from('user_roles')
@@ -19,9 +21,6 @@ async function isAuthorised(userId: string) {
     .limit(1)
   return data && data.length > 0
 }
-
-// Type for cookie objects returned by Supabase SSR
-type CookieOption = { name: string; value: string; options?: Record<string, unknown> }
 
 export async function POST(request: Request) {
   const cookieStore = await cookies()
@@ -79,25 +78,21 @@ export async function POST(request: Request) {
   return NextResponse.json({ success: true, userId: newUser.user.id })
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  // Get the session token from the Authorization header or cookies
   const cookieStore = await cookies()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll(cookiesToSet: CookieOption[]) {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options)
-          )
-        },
-      },
-    }
-  )
+  const accessToken = cookieStore.get('sb-access-token')?.value ||
+    cookieStore.get('supabase-auth-token')?.value
 
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!accessToken) {
+    return NextResponse.json({ error: 'Unauthorized - no token' }, { status: 401 })
+  }
+
+  // Verify the token and get the user
+  const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(accessToken)
+  if (authError || !user) {
+    return NextResponse.json({ error: 'Unauthorized - invalid token' }, { status: 401 })
+  }
 
   if (!(await isAuthorised(user.id))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
