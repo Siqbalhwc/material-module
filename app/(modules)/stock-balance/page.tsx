@@ -23,7 +23,7 @@ type ProductPosition = {
   category: string;
   opening: number;
   inflows: number;
-  material_used: number;       // computed from FG dispatches
+  material_used: number;       // raw material consumed in production runs
   stores: StoreClosing;
   totalClosing: number;
 };
@@ -94,29 +94,24 @@ export default function StockPositionPage() {
     endInclusive.setDate(endInclusive.getDate() + 1);
     const end = endInclusive.toISOString().slice(0, 10);
 
-    // Fetch all outward gate pass line items within the date range,
-    // with product name so we can match to raw materials
-    const { data: dispatchedItems, error: dispErr } = await supabase
-      .from("ogp_line_items")
-      .select("dispatched_qty, products( name )")
+    // 1. Fetch raw material consumption from production runs (only executed/verified runs)
+    const { data: productionData, error: prodRunErr } = await supabase
+      .from("production_runs")
+      .select("raw_material_product_id, kg_consumed")
       .gte("created_at", start)
-      .lt("created_at", end);
+      .lt("created_at", end)
+      .in("status", ["executed", "verified"]);
 
-    // Build a map: raw material name -> total dispatched qty
-    const dispatchMap = new Map<string, number>();
-    if (!dispErr && dispatchedItems) {
-      for (const item of dispatchedItems) {
-        const fgName = (item.products as any)?.name ?? "";
-        const qty = Number(item.dispatched_qty) || 0;
-        // We'll accumulate for each raw material whose name is contained in the FG name
-        // later when we process each product row
-        // For now we store per FG name
-        // We'll compute material_used per raw material by scanning all FGs
-        // in the loop below
+    // Build a map: raw_material_product_id -> total consumed
+    const consumptionMap = new Map<string, number>();
+    if (!prodRunErr && productionData) {
+      for (const row of productionData) {
+        const prev = consumptionMap.get(row.raw_material_product_id) || 0;
+        consumptionMap.set(row.raw_material_product_id, prev + Number(row.kg_consumed));
       }
     }
 
-    // Fetch all products that have ever appeared in stock_ledger
+    // 2. Fetch all products that have ever appeared in stock_ledger
     const { data: allProducts, error: prodErr } = await supabase
       .from("stock_ledger")
       .select("product_id, products( code, name, category, uom, conversion_kg )");
@@ -158,7 +153,7 @@ export default function StockPositionPage() {
 
     const items = Array.from(uniqueMap.values());
 
-    // Opening balances
+    // 3. Opening balances (before start)
     for (const item of items) {
       let totalOpening = 0;
       for (const store of storeKeys) {
@@ -177,7 +172,7 @@ export default function StockPositionPage() {
       item.opening = totalOpening;
     }
 
-    // Movements within the date range
+    // 4. Movements within the date range
     for (const item of items) {
       const { data: rangeData } = await supabase
         .from("stock_ledger")
@@ -213,24 +208,12 @@ export default function StockPositionPage() {
       }
     }
 
-    // Compute material_used for each raw material
-    if (!dispErr && dispatchedItems) {
-      for (const item of items) {
-        if (item.category === "Raw Material" || item.category === "Chemical") {
-          let totalDispatchedFG = 0;
-          for (const d of dispatchedItems) {
-            const fgName = ((d.products as any)?.name ?? "").toLowerCase();
-            const rawName = item.name.toLowerCase();
-            if (fgName.includes(rawName)) {
-              totalDispatchedFG += Number(d.dispatched_qty) || 0;
-            }
-          }
-          item.material_used = totalDispatchedFG * 1.025;
-        }
-      }
+    // 5. Set material_used from production runs
+    for (const item of items) {
+      item.material_used = consumptionMap.get(item.product_id) || 0;
     }
 
-    // Compute totalClosing taking material_used into account
+    // 6. Compute totalClosing
     for (const item of items) {
       item.totalClosing = item.opening + item.inflows - item.material_used;
     }
@@ -335,7 +318,7 @@ export default function StockPositionPage() {
     <>
       <Header
         title="Stock Position"
-        subtitle="Opening + Inflows – Material Used = Total Closing"
+        subtitle="Opening + Inflows – Material Consumed = Total Closing"
       />
       <main className="flex-1 p-6 space-y-6 print:space-y-4">
         {/* Controls */}
@@ -382,7 +365,7 @@ export default function StockPositionPage() {
                         />
                         <span className="capitalize text-gray-600">
                           {key === "material_used"
-                            ? "Mat. Used (calc)"
+                            ? "Material Consumed"
                             : key === "totalClosing"
                             ? "Total Closing"
                             : key.replace(/_/g, " ")}
@@ -471,7 +454,7 @@ export default function StockPositionPage() {
                           className="table-th cursor-pointer text-right"
                           onClick={() => handleSort("material_used")}
                         >
-                          Mat. Used (KG) {renderSortIcon("material_used")}
+                          Material Consumed (KG) {renderSortIcon("material_used")}
                         </th>
                       )}
                       {visibleColumns.material_store && (
