@@ -40,7 +40,9 @@ export default function AdminPage() {
         .eq("user_id", user.id)
         .then(({ data }) => {
           const authorised =
-            data?.some(r => r.role === "super_admin" || r.role === "admin") ?? false;
+            data?.some(
+              r => r.role === "super_admin" || r.role === "admin"
+            ) ?? false;
           setIsAuthorised(authorised);
         });
     });
@@ -115,7 +117,9 @@ export default function AdminPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">User Management</h1>
-            <p className="text-sm text-gray-500">Invite team members, assign roles, and manage company settings</p>
+            <p className="text-sm text-gray-500">
+              Invite team members, assign roles, and manage company settings
+            </p>
           </div>
           <div className="flex gap-2">
             <button
@@ -124,15 +128,26 @@ export default function AdminPage() {
             >
               <Plus className="h-4 w-4" /> Add User
             </button>
-            <Link href="/dashboard/settings" className="btn-secondary inline-flex items-center gap-1">
+            <Link
+              href="/dashboard/settings"
+              className="btn-secondary inline-flex items-center gap-1"
+            >
               <Settings className="h-4 w-4" /> Settings
             </Link>
           </div>
         </div>
 
         {/* Messages */}
-        {message && <div className="bg-green-50 text-green-700 p-3 rounded-lg text-sm">{message}</div>}
-        {error && <div className="bg-red-50 text-red-700 p-3 rounded-lg text-sm">{error}</div>}
+        {message && (
+          <div className="bg-green-50 text-green-700 p-3 rounded-lg text-sm">
+            {message}
+          </div>
+        )}
+        {error && (
+          <div className="bg-red-50 text-red-700 p-3 rounded-lg text-sm">
+            {error}
+          </div>
+        )}
 
         {/* Add User Form */}
         {showForm && (
@@ -140,21 +155,38 @@ export default function AdminPage() {
             <h2 className="text-sm font-semibold text-gray-700">New User</h2>
             <div>
               <label className="label">Full Name</label>
-              <input className="input" value={fullName} onChange={e => setFullName(e.target.value)} />
+              <input
+                className="input"
+                value={fullName}
+                onChange={e => setFullName(e.target.value)}
+              />
             </div>
             <div>
               <label className="label">Email</label>
-              <input className="input" type="email" value={email} onChange={e => setEmail(e.target.value)} />
+              <input
+                className="input"
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+              />
             </div>
             <div>
               <label className="label">Password</label>
-              <input className="input" type="password" value={password} onChange={e => setPassword(e.target.value)} />
+              <input
+                className="input"
+                type="password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+              />
             </div>
             <div>
               <label className="label">Roles</label>
               <div className="flex flex-wrap gap-3 mt-2">
                 {AVAILABLE_ROLES.map(role => (
-                  <label key={role.value} className="flex items-center gap-2 text-sm cursor-pointer">
+                  <label
+                    key={role.value}
+                    className="flex items-center gap-2 text-sm cursor-pointer"
+                  >
                     <input
                       type="checkbox"
                       checked={selectedRoles.includes(role.value)}
@@ -167,8 +199,17 @@ export default function AdminPage() {
               </div>
             </div>
             <div className="flex justify-end gap-2">
-              <button className="btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
-              <button className="btn-primary" disabled={saving} onClick={handleCreate}>
+              <button
+                className="btn-secondary"
+                onClick={() => setShowForm(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn-primary"
+                disabled={saving}
+                onClick={handleCreate}
+              >
                 {saving ? "Creating…" : "Create User"}
               </button>
             </div>
@@ -194,7 +235,9 @@ export default function AdminPage() {
               <tbody className="divide-y divide-gray-50">
                 {users.map(u => (
                   <tr key={u.id} className="hover:bg-gray-50">
-                    <td className="table-td font-medium">{u.fullName || "—"}</td>
+                    <td className="table-td font-medium">
+                      {u.fullName || "—"}
+                    </td>
                     <td className="table-td">{u.email}</td>
                     <td className="table-td">
                       <div className="flex flex-wrap gap-1">
@@ -212,7 +255,9 @@ export default function AdminPage() {
                       <RoleEditor
                         currentRoles={u.roles || []}
                         availableRoles={AVAILABLE_ROLES.map(r => r.value)}
-                        onSave={(newRoles) => handleUpdateRoles(u.id, newRoles)}
+                        onSave={newRoles =>
+                          handleUpdateRoles(u.id, newRoles)
+                        }
                       />
                     </td>
                   </tr>
@@ -226,7 +271,7 @@ export default function AdminPage() {
   );
 }
 
-// Small inline role editor component
+// Inline role editor component
 function RoleEditor({
   currentRoles,
   availableRoles,
@@ -256,7 +301,10 @@ function RoleEditor({
         <div className="absolute left-0 top-6 bg-white border border-gray-200 rounded-md shadow-lg p-3 z-20 w-48">
           <div className="space-y-1 mb-2">
             {availableRoles.map(role => (
-              <label key={role} className="flex items-center gap-2 text-xs cursor-pointer">
+              <label
+                key={role}
+                className="flex items-center gap-2 text-xs cursor-pointer"
+              >
                 <input
                   type="checkbox"
                   checked={selected.includes(role)}
