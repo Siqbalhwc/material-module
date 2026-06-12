@@ -95,7 +95,8 @@ export default function ProductsPage() {
 
     // Flatten for display: parents first, then children indented
     const displayList: ProductWithParent[] = [];
-    for (const parent of parentMap.values()) {
+    const parentEntries = Array.from(parentMap.entries());
+    for (const [, parent] of parentEntries) {
       displayList.push(parent);
       if (parent.children && parent.children.length > 0) {
         displayList.push(...parent.children);
