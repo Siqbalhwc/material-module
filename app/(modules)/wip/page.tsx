@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo } from "react";
 import Header from "@/components/layout/Header";
 import {
   Search, ArrowUpDown, ArrowUp, ArrowDown, Package,
-  Send, Printer, Wrench, X, Settings2,
+  Send, Printer, Wrench, X, Settings2, Factory,
   ChevronDown, ChevronRight
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -67,17 +67,15 @@ export default function WIPPage() {
   const [incoming, setIncoming] = useState<PendingTransfer[]>([]);
   const [showIncoming, setShowIncoming] = useState(false);
 
-  // Transfer Out modal
-  const [transferItem, setTransferItem] = useState<WIPStockMovement | null>(null);
-  const [transferTarget, setTransferTarget] = useState<"rc" | "fg">("rc");
-  const [transferQtyKg, setTransferQtyKg] = useState("");
-  const [transferQtyBags, setTransferQtyBags] = useState("");
-  const [transferring, setTransferring] = useState(false);
-
-  const [fgProducts, setFgProducts] = useState<{ id: string; name: string; code: string }[]>([]);
-  const [selectedFGProduct, setSelectedFGProduct] = useState("");
-  const [newFGName, setNewFGName] = useState("");
-  const [newFGWeight, setNewFGWeight] = useState("");
+  // ── Record Production modal ──
+  const [prodItem, setProdItem] = useState<WIPStockMovement | null>(null);
+  const [consumed, setConsumed] = useState("");
+  const [produced, setProduced] = useState("");
+  const [waste, setWaste] = useState("");
+  const [fgProductId, setFgProductId] = useState("");
+  const [newFgName, setNewFgName] = useState("");
+  const [fgList, setFgList] = useState<any[]>([]);
+  const [producing, setProducing] = useState(false);
 
   const fetchMovements = async () => {
     setLoading(true);
@@ -138,7 +136,6 @@ export default function WIPPage() {
       if (!item.parent_product_id) parentMap.set(item.product_id, { ...item, children: [] });
       else children.push({ ...item, isChild: true });
     }
-    // Fetch missing parents
     const missingParentIds = Array.from(new Set(children.map(c => c.parent_product_id!).filter(pid => pid && !parentMap.has(pid))));
     if (missingParentIds.length > 0) {
       const { data: missingParents } = await supabase.from("products").select("id, code, name, category, uom, conversion_kg").in("id", missingParentIds);
@@ -173,12 +170,12 @@ export default function WIPPage() {
     if (data) setIncoming(data.map((r: any) => ({ id: r.id, from_store: r.from_store, product_id: r.product_id, product_name: r.products?.name ?? "", product_code: r.products?.code ?? "", quantity: r.quantity, uom: r.uom })));
   };
 
-  const fetchFG = async () => {
+  const fetchFgList = async () => {
     const { data } = await supabase.from("products").select("id, name, code").eq("category", "Finished Good").eq("is_active", true);
-    if (data) setFgProducts(data);
+    if (data) setFgList(data);
   };
 
-  useEffect(() => { fetchMovements(); fetchIncoming(); fetchFG(); }, [startDate, endDate]);
+  useEffect(() => { fetchMovements(); fetchIncoming(); fetchFgList(); }, [startDate, endDate]);
 
   const toggleExpand = (id: string) => {
     setExpandedParents(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -213,10 +210,7 @@ export default function WIPPage() {
     const childMap = new Map<string, WIPStockMovement[]>();
     list.filter(i => i.isChild).forEach(c => { const pid = c.parent_product_id!; if (!childMap.has(pid)) childMap.set(pid, []); childMap.get(pid)!.push(c); });
     const result: WIPStockMovement[] = [];
-    for (const parent of parents) {
-      result.push(parent);
-      result.push(...(childMap.get(parent.product_id) || []));
-    }
+    for (const parent of parents) { result.push(parent); result.push(...(childMap.get(parent.product_id) || [])); }
     return result;
   }, [movements, searchQuery, sortField, sortDir]);
 
@@ -236,21 +230,39 @@ export default function WIPPage() {
     fetchIncoming(); fetchMovements();
   };
 
-  const updateBags = (v: string) => { setTransferQtyBags(v); const b = parseFloat(v); if (transferItem?.conversion_kg && !isNaN(b)) setTransferQtyKg((b * transferItem.conversion_kg).toFixed(3)); else setTransferQtyKg(""); };
-  const updateKg = (v: string) => { setTransferQtyKg(v); const k = parseFloat(v); if (transferItem?.conversion_kg && !isNaN(k)) setTransferQtyBags((k / transferItem.conversion_kg).toFixed(3)); else setTransferQtyBags(""); };
-
-  const handleTransferOut = async () => {
-    if (!transferItem) return;
-    const qty = parseFloat(transferQtyKg);
-    if (isNaN(qty) || qty <= 0 || qty > transferItem.closing_kg) { alert("Invalid quantity"); return; }
-    setTransferring(true);
+  // ── Production handler ──
+  const handleProduction = async () => {
+    if (!prodItem) return;
+    const cons = parseFloat(consumed);
+    const prod = parseFloat(produced);
+    const wst = parseFloat(waste);
+    if (isNaN(cons) || isNaN(prod) || isNaN(wst) || cons <= 0 || prod < 0 || wst < 0 || cons > prodItem.closing_kg) { alert("Invalid quantities."); return; }
+    if (Math.abs(cons - (prod + wst)) > 0.001) { alert(`Total must balance: ${cons} ≠ ${prod} + ${wst}`); return; }
+    if (!fgProductId && !newFgName) { alert("Select or create a finished good."); return; }
+    setProducing(true);
     try {
-      let toStore = transferTarget === "rc" ? "rc_store" : "finished_goods";
-      await supabase.from("store_transfers").insert({ from_store: "wip", to_store: toStore, product_id: transferItem.product_id, quantity: qty, uom: transferItem.uom, status: "pending" });
-      alert("Transfer sent to " + toStore);
-      fetchMovements(); setTransferItem(null); setTransferQtyKg(""); setTransferQtyBags("");
-    } catch (e: any) { alert(e.message); } finally { setTransferring(false); }
+      let fgId = fgProductId;
+      if (!fgId && newFgName) {
+        const { data: newProd } = await supabase.from("products").insert({ name: newFgName, category: "Finished Good", uom: "kg", is_rc: false, reorder_level: 0 }).select().single();
+        if (!newProd) throw new Error("Failed to create product");
+        fgId = newProd.id;
+        setFgList(prev => [...prev, { id: newProd.id, name: newProd.name, code: newProd.code }]);
+      }
+      if (!fgId) throw new Error("No finished good product selected.");
+      const { data: pr } = await supabase.from("production_runs").insert({ raw_material_product_id: prodItem.product_id, finished_good_product_id: fgId, kg_consumed: cons, kg_produced: prod, kg_waste: wst }).select().single();
+      if (!pr) throw new Error("Failed to create production run");
+      const ledgerRows = [
+        { product_id: prodItem.product_id, store: "wip" as StoreType, txn_type: "consumed", quantity: cons, direction: -1, reference_type: "production_run", reference_id: pr.id },
+        { product_id: fgId, store: "finished_goods" as StoreType, txn_type: "produced", quantity: prod, direction: 1, reference_type: "production_run", reference_id: pr.id },
+      ];
+      if (wst > 0) ledgerRows.push({ product_id: prodItem.product_id, store: "rc_store" as StoreType, txn_type: "waste", quantity: wst, direction: 1, reference_type: "production_run", reference_id: pr.id });
+      await supabase.from("stock_ledger").insert(ledgerRows);
+      fetchMovements(); setProdItem(null); setConsumed(""); setProduced(""); setWaste(""); setFgProductId(""); setNewFgName("");
+    } catch (e: any) { alert(e.message); } finally { setProducing(false); }
   };
+
+  const updateConsumed = (v: string) => { setConsumed(v); const c = parseFloat(v); const p = parseFloat(produced); if (!isNaN(c) && !isNaN(p)) setWaste((c - p).toFixed(3)); };
+  const updateProduced = (v: string) => { setProduced(v); const c = parseFloat(consumed); const p = parseFloat(v); if (!isNaN(c) && !isNaN(p)) setWaste((c - p).toFixed(3)); };
 
   const renderRow = (item: WIPStockMovement) => {
     const isParent = !item.isChild && item.children && item.children.length > 0;
@@ -272,7 +284,13 @@ export default function WIPPage() {
         {visibleColumns.issued_fg_kg && <td className="table-td text-right">{item.issued_fg_kg.toFixed(3)}</td>}
         {visibleColumns.issued_rc_kg && <td className="table-td text-right">{item.issued_rc_kg.toFixed(3)}</td>}
         {visibleColumns.closing_kg && <td className="table-td text-right font-medium">{item.closing_kg.toFixed(3)}</td>}
-        <td className="table-td print:hidden">{!isParent && <button className="text-xs text-brand-600" onClick={() => { setTransferItem(item); setTransferQtyKg(""); setTransferQtyBags(""); }}><Send className="h-3 w-3 inline" /> Transfer Out</button>}</td>
+        <td className="table-td print:hidden">
+          {!isParent && (
+            <button className="text-xs text-brand-600" onClick={() => { setProdItem(item); setConsumed(""); setProduced(""); setWaste(""); setFgProductId(""); setNewFgName(""); }}>
+              <Factory className="h-3 w-3 inline" /> Record Production
+            </button>
+          )}
+        </td>
       </tr>
     );
   };
@@ -317,8 +335,8 @@ export default function WIPPage() {
         {/* Incoming modal */}
         {showIncoming && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"><div className="bg-white rounded-xl p-6 w-full max-w-2xl"><div className="flex justify-between"><h2 className="text-lg font-semibold">Incoming</h2><button onClick={() => setShowIncoming(false)}><X className="h-5 w-5" /></button></div>{incoming.length === 0 ? <p>No pending transfers.</p> : <table className="w-full text-sm"><thead><tr><th>From</th><th>Product</th><th>Qty</th><th>UOM</th><th></th></tr></thead><tbody>{incoming.map(t => <tr key={t.id}><td>{t.from_store}</td><td>{t.product_name}</td><td>{t.quantity}</td><td>{t.uom}</td><td className="space-x-1"><button onClick={() => handleIncomingAction(t.id, "accepted")} className="text-green-600 text-xs">Accept</button><button onClick={() => handleIncomingAction(t.id, "rejected")} className="text-red-600 text-xs">Reject</button></td></tr>)}</tbody></table>}</div></div>}
 
-        {/* Transfer Out modal */}
-        {transferItem && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"><div className="bg-white rounded-xl p-6 w-96"><h2 className="text-lg font-semibold">Transfer: {transferItem.name}</h2><p className="text-sm">Available: {transferItem.closing_kg.toFixed(3)} kg</p><input type="number" step="0.001" max={transferItem.closing_kg} className="input" value={transferQtyKg} onChange={e => updateKg(e.target.value)} />{transferItem.uom === "bags" && transferItem.conversion_kg && <input type="number" step="0.001" className="input" value={transferQtyBags} onChange={e => updateBags(e.target.value)} placeholder="Bags" />}<div className="flex gap-2 mt-2"><label><input type="radio" name="dest" checked={transferTarget === "rc"} onChange={() => setTransferTarget("rc")} /> RC</label><label><input type="radio" name="dest" checked={transferTarget === "fg"} onChange={() => setTransferTarget("fg")} /> FG</label></div><div className="flex justify-end gap-2 mt-4"><button className="btn-secondary" onClick={() => setTransferItem(null)}>Cancel</button><button className="btn-primary" disabled={transferring} onClick={handleTransferOut}>Send</button></div></div></div>}
+        {/* Production modal */}
+        {prodItem && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"><div className="bg-white rounded-xl p-6 w-96 space-y-4"><h2 className="text-lg font-semibold">Record Production: {prodItem.name}</h2><p className="text-sm">Available: {prodItem.closing_kg.toFixed(3)} kg</p><input type="number" step="0.001" max={prodItem.closing_kg} className="input" value={consumed} onChange={e => updateConsumed(e.target.value)} placeholder="KG Consumed" /><input type="number" step="0.001" className="input" value={produced} onChange={e => updateProduced(e.target.value)} placeholder="KG Produced" /><input type="number" step="0.001" className="input" value={waste} onChange={e => setWaste(e.target.value)} placeholder="KG Waste" /><div><select className="input" value={fgProductId} onChange={e => setFgProductId(e.target.value)}><option value="">-- Choose FG --</option>{fgList.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select><input className="input mt-2" placeholder="Or new FG name" value={newFgName} onChange={e => setNewFgName(e.target.value)} /></div><div className="flex justify-end gap-2"><button className="btn-secondary" onClick={() => setProdItem(null)}>Cancel</button><button className="btn-primary" disabled={producing} onClick={handleProduction}>Record</button></div></div></div>}
       </main>
     </>
   );
