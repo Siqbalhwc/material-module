@@ -324,20 +324,58 @@ export default function ProductsPage() {
   };
 
   // ── Nuke ─────────────────────────────────────────────────
-  const handleNuke = async () => {
-    if (!confirm("⚠️ This will DELETE ALL transaction data (stock, gate passes, production runs, transfers).\n\nProducts, suppliers, customers, and users will be kept.\n\nAre you absolutely sure?")) return;
-    if (!confirm("Final confirmation: Type 'DELETE' to proceed.") === false) {
-      const input = prompt('Type "DELETE" to confirm nuke:');
-      if (input !== "DELETE") return;
+const handleNuke = async () => {
+  if (!confirm("⚠️ This will DELETE ALL transaction data (stock, gate passes, production runs, transfers).\n\nProducts, suppliers, customers, and users will be kept.\n\nAre you absolutely sure?")) return;
+
+  // Ask if products should also be deleted
+  const deleteProducts = confirm("Do you also want to delete ALL PRODUCTS?\n\nClick OK to delete products too, or Cancel to keep products.");
+
+  const input = prompt('Type "DELETE" to confirm:');
+  if (input !== "DELETE") return;
+
+  try {
+    const tables = [
+      "dispatch_items", "dispatch_orders",
+      "wip_material_consumption", "wip_batches",
+      "requisition_items", "requisitions",
+      "fg_transfers", "rc_movements",
+      "ogp_line_items", "outward_gate_passes",
+      "igp_line_items", "inward_gate_passes",
+      "production_runs", "store_transfers",
+      "stock_ledger",
+    ];
+
+    for (const table of tables) {
+      const { error } = await supabase
+        .from(table)
+        .delete()
+        .neq("id", "00000000-0000-0000-0000-000000000000");
+      if (error) {
+        console.error(`Failed to delete ${table}:`, error.message);
+        alert(`Failed to delete ${table}: ${error.message}`);
+        return;
+      }
     }
 
-    const { error } = await supabase.rpc("nuke_all_data");
-    if (error) {
-      alert("Failed: " + error.message);
-    } else {
-      alert("✅ All transaction data cleared.");
+    // Optional: delete all products
+    if (deleteProducts) {
+      const { error: prodErr } = await supabase
+        .from("products")
+        .delete()
+        .neq("id", "00000000-0000-0000-0000-000000000000");
+      if (prodErr) {
+        alert("Failed to delete products: " + prodErr.message);
+        return;
+      }
     }
-  };
+
+    alert(`✅ All transaction data cleared.${deleteProducts ? " Products also deleted." : ""}`);
+    fetchProducts();
+  } catch (err: any) {
+    alert("Failed: " + err.message);
+  }
+};
+
 
   // Search filter
   const filteredProducts = useMemo(() => {
