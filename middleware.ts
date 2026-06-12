@@ -1,6 +1,8 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+type CookieOption = { name: string; value: string; options?: Record<string, unknown> }
+
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
@@ -10,7 +12,7 @@ export async function middleware(request: NextRequest) {
     {
       cookies: {
         getAll() { return request.cookies.getAll() },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: CookieOption[]) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value)
           )
@@ -23,7 +25,7 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  // This refreshes the session token – essential for route handlers
+  // Refresh the session
   await supabase.auth.getUser()
 
   return supabaseResponse
