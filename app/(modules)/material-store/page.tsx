@@ -176,7 +176,7 @@ export default function MaterialStorePage() {
       i => i.category === "Raw Material" || i.category === "Chemical"
     );
 
-    // ── NEW: build parent→children map, aggregate totals ──
+    // ── Build parent→children map, aggregate totals ──
     const parentMap = new Map<string, MaterialStockMovement>();
     const childItems: MaterialStockMovement[] = [];
 
@@ -185,6 +185,42 @@ export default function MaterialStorePage() {
         parentMap.set(item.product_id, { ...item, children: [] });
       } else {
         childItems.push({ ...item, isChild: true });
+      }
+    }
+
+    // Fetch parent products that have NO ledger entries of their own
+    // (only their children appear in stock_ledger, so parentMap won't have them yet)
+    const missingParentIds = Array.from(
+      new Set(
+        childItems
+          .map(c => c.parent_product_id!)
+          .filter(pid => pid && !parentMap.has(pid))
+      )
+    );
+
+    if (missingParentIds.length > 0) {
+      const { data: missingParents } = await supabase
+        .from("products")
+        .select("id, code, name, category, uom, conversion_kg, reorder_level")
+        .in("id", missingParentIds);
+
+      for (const p of (missingParents || [])) {
+        parentMap.set(p.id, {
+          product_id: p.id,
+          code: p.code ?? "",
+          name: p.name ?? "Unknown",
+          category: p.category ?? "",
+          uom: p.uom ?? "",
+          conversion_kg: p.conversion_kg ?? undefined,
+          reorder_level: p.reorder_level ?? 0,
+          opening_kg: 0,
+          received_supplier_kg: 0,
+          received_rc_kg: 0,
+          issued_wip_kg: 0,
+          closing_kg: 0,
+          parent_product_id: null,
+          children: [],
+        });
       }
     }
 
@@ -198,9 +234,8 @@ export default function MaterialStorePage() {
         parent.received_rc_kg += child.received_rc_kg;
         parent.issued_wip_kg += child.issued_wip_kg;
         parent.closing_kg += child.closing_kg;
-      }
-      // If parent not in store yet, treat child as standalone
-      else {
+      } else {
+        // Parent not resolvable — show child as standalone
         parentMap.set(child.product_id, { ...child, isChild: false, parent_product_id: null, children: [] });
       }
     }
