@@ -3,25 +3,26 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  LayoutDashboard, Truck, Warehouse, FileText, Wrench,
-  RotateCcw, Package, Send, BarChart3, ShoppingBag,
+  LayoutDashboard, Truck, Warehouse, Package, Wrench,
+  RotateCcw, BarChart3, ShoppingBag, Send,
   ChevronRight, Settings, Shield,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createBrowserClient } from "@supabase/ssr";
 import { useState, useEffect } from "react";
 
+// Each item lists which roles can see it. "*" means everyone.
 const NAV = [
-  { label: "Dashboard",        href: "/dashboard",                icon: LayoutDashboard },
-  { label: "Gate Pass",        href: "/gate-pass",                icon: Truck },
-  { label: "Material Store",   href: "/material-store",           icon: Warehouse },
-  { label: "Parts Store",      href: "/parts-store",              icon: Package },
-  { label: "WIP Batches",      href: "/wip",                      icon: Wrench },
-  { label: "RC Store",         href: "/rc-store",                 icon: RotateCcw },
-  { label: "Finished Goods",   href: "/finished-goods",           icon: Package },
-  { label: "Stock Balance",    href: "/stock-balance",            icon: BarChart3 },
-  { label: "Products",         href: "/products",                 icon: ShoppingBag },
-  { label: "Outward Gate Pass", href: "/outward-gate-pass", icon: Send },
+  { label: "Dashboard",        href: "/dashboard",                icon: LayoutDashboard, roles: ["*"] },
+  { label: "Gate Pass",        href: "/gate-pass",                icon: Truck,           roles: ["super_admin","admin","store_keeper","gate_pass_operator"] },
+  { label: "Outward Gate Pass",href: "/outward-gate-pass",        icon: Send,            roles: ["super_admin","admin","gate_pass_operator"] },
+  { label: "Material Store",   href: "/material-store",           icon: Warehouse,       roles: ["super_admin","admin","store_keeper"] },
+  { label: "Parts Store",      href: "/parts-store",              icon: Package,         roles: ["super_admin","admin","store_keeper"] },
+  { label: "WIP Batches",      href: "/wip",                      icon: Wrench,          roles: ["super_admin","admin","wip_operator"] },
+  { label: "RC Store",         href: "/rc-store",                 icon: RotateCcw,       roles: ["super_admin","admin","rc_store_keeper"] },
+  { label: "Finished Goods",   href: "/finished-goods",           icon: Package,         roles: ["super_admin","admin","wip_operator"] },
+  { label: "Stock Balance",    href: "/stock-balance",            icon: BarChart3,       roles: ["super_admin","admin","viewer","store_keeper","wip_operator","rc_store_keeper","gate_pass_operator"] },
+  { label: "Products",         href: "/products",                 icon: ShoppingBag,     roles: ["super_admin","admin"] },
 ];
 
 export default function Sidebar() {
@@ -34,7 +35,7 @@ export default function Sidebar() {
 
   const [companyName, setCompanyName] = useState("MaterialFlow");
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [userRoles, setUserRoles] = useState<string[]>([]);
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -49,26 +50,32 @@ export default function Sidebar() {
       }
     };
 
-    const checkAdmin = async () => {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
-  const { data } = await supabase
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", user.id)
-    .in("role", ["admin", "super_admin"])
-    .limit(1);
-  setIsAdmin(!!(data && data.length > 0));
-};
+    const fetchRoles = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", user.id);
+      if (data) setUserRoles(data.map(r => r.role));
+    };
 
     fetchSettings();
-    checkAdmin();
+    fetchRoles();
   }, []);
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     router.push("/");
   };
+
+  // Filter nav items based on user's roles
+  const visibleNav = NAV.filter(item => {
+    if (item.roles.includes("*")) return true;
+    return item.roles.some(role => userRoles.includes(role));
+  });
+
+  const isAdmin = userRoles.includes("admin") || userRoles.includes("super_admin");
 
   return (
     <aside className="fixed inset-y-0 left-0 z-30 flex w-60 flex-col border-r border-gray-100 bg-white">
@@ -95,16 +102,13 @@ export default function Sidebar() {
         <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-widest text-gray-400">
           Modules
         </p>
-        {NAV.map(({ label, href, icon: Icon }) => {
+        {visibleNav.map(({ label, href, icon: Icon }) => {
           const active = path === href || path.startsWith(href + "/");
           return (
             <Link
               key={href}
               href={href}
-              className={cn(
-                "sidebar-item",
-                active && "active"
-              )}
+              className={cn("sidebar-item", active && "active")}
             >
               <Icon className="h-4 w-4 flex-shrink-0" />
               <span className="flex-1">{label}</span>
@@ -119,10 +123,7 @@ export default function Sidebar() {
         {isAdmin && (
           <Link
             href="/dashboard/admin"
-            className={cn(
-              "sidebar-item",
-              path === "/dashboard/admin" && "active"
-            )}
+            className={cn("sidebar-item", path === "/dashboard/admin" && "active")}
           >
             <Shield className="h-4 w-4 flex-shrink-0" />
             <span className="flex-1">Admin</span>
@@ -132,10 +133,7 @@ export default function Sidebar() {
         {/* Settings */}
         <Link
           href="/dashboard/settings"
-          className={cn(
-            "sidebar-item",
-            path.startsWith("/dashboard/settings") && "active"
-          )}
+          className={cn("sidebar-item", path.startsWith("/dashboard/settings") && "active")}
         >
           <Settings className="h-4 w-4 flex-shrink-0" />
           <span className="flex-1">Settings</span>
