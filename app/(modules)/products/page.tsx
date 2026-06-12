@@ -1,10 +1,11 @@
 "use client";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import Header from "@/components/layout/Header";
-import { Plus, ShoppingBag, RotateCcw, Settings2, Search, ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, ChevronRight } from "lucide-react";
+import { Plus, ShoppingBag, RotateCcw, Settings2, Search, ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, ChevronRight, Download, Upload, Trash2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { Product } from "@/types";
+import * as XLSX from 'xlsx';
 
 // Extended product type with parent info
 type ProductWithParent = Product & {
@@ -17,6 +18,7 @@ const CATEGORIES = [
   { value: "Raw Material", label: "Raw Material (PP, Natural, Calpet, MB)" },
   { value: "Chemical", label: "Chemical (Ink, IPA, Oil)" },
   { value: "Store / Consumable", label: "Store / Consumable" },
+  { value: "Finished Good", label: "Finished Good" },
 ];
 
 const UOM_LIST = ["kg", "bags", "litres", "units", "metres", "pcs"];
@@ -60,7 +62,29 @@ export default function ProductsPage() {
   // Expand/collapse parents
   const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
 
+  // Super admin check
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+
+  // Import
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState("");
+
   const supabase = createClient();
+
+  // Check if current user is super_admin
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return;
+      supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", user.id)
+        .eq("role", "super_admin")
+        .maybeSingle()
+        .then(({ data }) => setIsSuperAdmin(!!data));
+    });
+  }, []);
 
   const fetchProducts = async () => {
     const { data, error } = await supabase
@@ -182,7 +206,140 @@ export default function ProductsPage() {
     });
   };
 
-  // Search filter (search both parents and children)
+  // ── Export ───────────────────────────────────────────────
+  const handleExport = () => {
+    const flatData = products.map(p => ({
+      Code: p.code,
+      Name: p.name,
+      Category: p.category,
+      UOM: p.uom,
+      "Kg/Bag": p.conversion_kg || "",
+      "Reorder Level": p.reorder_level,
+      "Is RC": p.is_rc ? "TRUE" : "FALSE",
+      Active: p.is_active ? "TRUE" : "FALSE",
+      "Parent Product Name": p.parent_product_id
+        ? products.find(x => x.id === p.parent_product_id)?.name || ""
+        : "",
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(flatData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Products");
+    XLSX.writeFile(wb, "products_export.xlsx");
+  };
+
+  // ── Download Template ───────────────────────────────────
+  const handleDownloadTemplate = () => {
+    const template = [
+      {
+        Name: "Example Product",
+        Category: "Raw Material",
+        UOM: "kg",
+        "Kg/Bag": "",
+        "Reorder Level": "0",
+        "Is RC": "FALSE",
+        "Parent Product Name": "",
+      },
+    ];
+
+    const ws = XLSX.utils.json_to_sheet(template);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Template");
+    XLSX.writeFile(wb, "product_import_template.xlsx");
+  };
+
+  // ── Import ───────────────────────────────────────────────
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImporting(true);
+    setImportMsg("");
+
+    try {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data);
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json<any>(sheet);
+
+      let created = 0;
+      let errors = 0;
+
+      for (const row of rows) {
+        try {
+          const name = row["Name"]?.toString().trim();
+          const category = row["Category"]?.toString().trim();
+          const uom = row["UOM"]?.toString().trim() || "kg";
+          const conversion_kg = row["Kg/Bag"] ? parseFloat(row["Kg/Bag"]) : null;
+          const reorder_level = row["Reorder Level"] ? parseFloat(row["Reorder Level"]) : 0;
+          const is_rc = row["Is RC"]?.toString().toUpperCase() === "TRUE";
+          const parentName = row["Parent Product Name"]?.toString().trim();
+
+          if (!name || !category) {
+            errors++;
+            continue;
+          }
+
+          // Find parent product if specified
+          let parentId = null;
+          if (parentName) {
+            const { data: parent } = await supabase
+              .from("products")
+              .select("id")
+              .eq("name", parentName)
+              .maybeSingle();
+            if (parent) parentId = parent.id;
+          }
+
+          const payload: any = {
+            name,
+            category,
+            uom,
+            is_rc,
+            reorder_level,
+          };
+          if (conversion_kg) payload.conversion_kg = conversion_kg;
+          if (parentId) payload.parent_product_id = parentId;
+
+          const { error } = await supabase.from("products").insert([payload]);
+          if (error) {
+            console.error("Import error:", error);
+            errors++;
+          } else {
+            created++;
+          }
+        } catch {
+          errors++;
+        }
+      }
+
+      setImportMsg(`✅ ${created} products created. ${errors > 0 ? `${errors} rows skipped.` : ""}`);
+      fetchProducts();
+    } catch (err: any) {
+      setImportMsg("❌ Failed to read file.");
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  // ── Nuke ─────────────────────────────────────────────────
+  const handleNuke = async () => {
+    if (!confirm("⚠️ This will DELETE ALL transaction data (stock, gate passes, production runs, transfers).\n\nProducts, suppliers, customers, and users will be kept.\n\nAre you absolutely sure?")) return;
+    if (!confirm("Final confirmation: Type 'DELETE' to proceed.") === false) {
+      const input = prompt('Type "DELETE" to confirm nuke:');
+      if (input !== "DELETE") return;
+    }
+
+    const { error } = await supabase.rpc("nuke_all_data");
+    if (error) {
+      alert("Failed: " + error.message);
+    } else {
+      alert("✅ All transaction data cleared.");
+    }
+  };
+
+  // Search filter
   const filteredProducts = useMemo(() => {
     if (!searchQuery.trim()) return products;
     const q = searchQuery.toLowerCase();
@@ -202,12 +359,35 @@ export default function ProductsPage() {
         title="Products"
         subtitle="Master list — raw materials, chemicals and consumables"
         actions={
-          <button className="btn-primary" onClick={() => setShowForm((v) => !v)}>
-            <Plus className="h-4 w-4" /> Add Product
-          </button>
+          <div className="flex gap-2">
+            {isSuperAdmin && (
+              <>
+                <button onClick={handleDownloadTemplate} className="btn-secondary text-xs flex items-center gap-1">
+                  <Download className="h-3.5 w-3.5" /> Template
+                </button>
+                <button onClick={() => fileInputRef.current?.click()} disabled={importing} className="btn-secondary text-xs flex items-center gap-1">
+                  <Upload className="h-3.5 w-3.5" /> {importing ? "Importing…" : "Import"}
+                </button>
+                <button onClick={handleExport} className="btn-secondary text-xs flex items-center gap-1">
+                  <Download className="h-3.5 w-3.5" /> Export
+                </button>
+                <button onClick={handleNuke} className="btn-secondary text-xs flex items-center gap-1 text-red-600 hover:bg-red-50">
+                  <Trash2 className="h-3.5 w-3.5" /> Nuke
+                </button>
+                <input type="file" ref={fileInputRef} onChange={handleImport} accept=".xlsx,.xls,.csv" hidden />
+              </>
+            )}
+            <button className="btn-primary" onClick={() => setShowForm((v) => !v)}>
+              <Plus className="h-4 w-4" /> Add Product
+            </button>
+          </div>
         }
       />
       <main className="flex-1 p-6 space-y-4">
+        {importMsg && (
+          <div className="bg-blue-50 text-blue-700 p-3 rounded-lg text-sm">{importMsg}</div>
+        )}
+
         {showForm && (
           <div className="card p-6 max-w-2xl">
             <h2 className="text-sm font-semibold text-gray-700 mb-4">New Product</h2>
@@ -229,7 +409,6 @@ export default function ProductsPage() {
                 </select>
               </div>
 
-              {/* Subcategory dropdown – only if category is selected */}
               {form.category && parentOptions.length > 0 && (
                 <div className="col-span-2">
                   <label className="label">Subcategory of… (optional)</label>
@@ -245,7 +424,6 @@ export default function ProductsPage() {
                       </option>
                     ))}
                   </select>
-                  <p className="text-xs text-gray-400 mt-1">If selected, this product will be a subcategory</p>
                 </div>
               )}
 
@@ -312,7 +490,6 @@ export default function ProductsPage() {
                 <label htmlFor="is_rc" className="text-sm text-gray-700 cursor-pointer">
                   Returnable Component (RC)
                 </label>
-                <span className="text-xs text-gray-400 ml-1">(recovered from WIP, not purchased)</span>
               </div>
 
               <div className="col-span-2 flex justify-end gap-2">
@@ -380,7 +557,7 @@ export default function ProductsPage() {
             <table className="w-full">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  <th className="table-th w-8"></th>  {/* expand/collapse */}
+                  <th className="table-th w-8"></th>
                   {visibleColumns.code && (
                     <th className="table-th cursor-pointer select-none hover:bg-gray-100">
                       <span className="inline-flex items-center">Code {renderSortIcon("code")}</span>
@@ -429,7 +606,6 @@ export default function ProductsPage() {
                   const isChild = !!p.parent_product_id;
                   const isExpanded = expandedParents.has(p.id);
 
-                  // If this is a child of a collapsed parent, don't show it
                   if (isChild && p.parent_product_id && !expandedParents.has(p.parent_product_id)) {
                     return null;
                   }
