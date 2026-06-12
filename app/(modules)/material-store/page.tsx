@@ -207,7 +207,7 @@ export default function MaterialStorePage() {
 
     // Flatten: parents then their children (display order)
     const displayList: MaterialStockMovement[] = [];
-    for (const [, parent] of parentMap.entries()) {
+    for (const [, parent] of Array.from(parentMap.entries())) {
       displayList.push(parent);
       if (parent.children && parent.children.length > 0) {
         displayList.push(...parent.children);
