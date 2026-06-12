@@ -12,6 +12,27 @@ export default function CompanySettingsPage() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   )
 
+  // ── Authorization guard ──────────────────────────────────
+  const [isAuthorised, setIsAuthorised] = useState(false)
+  const [checking, setChecking] = useState(true)
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) { setChecking(false); return }
+      supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", user.id)
+        .then(({ data }) => {
+          const authorised =
+            data?.some(r => r.role === "super_admin" || r.role === "admin") ?? false
+          setIsAuthorised(authorised)
+          setChecking(false)
+        })
+    })
+  }, [])
+
+  // ── Original settings state ─────────────────────────────
   const [companyName, setCompanyName] = useState("MaterialFlow")
   const [logoUrl, setLogoUrl] = useState("")
   const [logoFile, setLogoFile] = useState<File | null>(null)
@@ -23,6 +44,7 @@ export default function CompanySettingsPage() {
 
   // Load existing settings
   useEffect(() => {
+    if (!isAuthorised) return       // wait until role check completes
     const fetchSettings = async () => {
       const { data } = await supabase
         .from("company_settings")
@@ -38,7 +60,7 @@ export default function CompanySettingsPage() {
       setLoading(false)
     }
     fetchSettings()
-  }, [])
+  }, [isAuthorised])
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -56,7 +78,6 @@ export default function CompanySettingsPage() {
 
     let newLogoUrl = logoUrl
 
-    // Upload new logo if provided
     if (logoFile) {
       const fileExt = logoFile.name.split(".").pop()
       const fileName = `logo-${Date.now()}.${fileExt}`
@@ -74,7 +95,6 @@ export default function CompanySettingsPage() {
       newLogoUrl = publicUrlData?.publicUrl || ""
     }
 
-    // Upsert settings (always update the first row, id=1)
     const { error } = await supabase
       .from("company_settings")
       .upsert({ id: 1, company_name: companyName, logo_url: newLogoUrl, updated_at: new Date().toISOString() })
@@ -95,8 +115,30 @@ export default function CompanySettingsPage() {
     setSaving(false)
   }
 
+  // ── Render ──────────────────────────────────────────────
+  if (checking) {
+    return (
+      <div className="flex items-center justify-center h-screen text-gray-400">
+        Loading…
+      </div>
+    )
+  }
+
+  if (!isAuthorised) {
+    return (
+      <div className="flex items-center justify-center h-screen text-red-600 font-medium">
+        Access Denied – Admin or Super Admin only
+      </div>
+    )
+  }
+
+  // Original UI (unchanged)
   if (loading) {
-    return <div style={{ padding: 40, textAlign: "center", color: "#6b7280" }}>Loading…</div>
+    return (
+      <div className="flex items-center justify-center h-screen text-gray-400">
+        Loading…
+      </div>
+    )
   }
 
   return (
