@@ -24,6 +24,7 @@ type MaterialStockMovement = {
   issued_wip_kg: number;
   closing_kg: number;
   parent_product_id?: string | null;
+  isParent?: boolean;
   children?: MaterialStockMovement[];
 };
 
@@ -49,7 +50,7 @@ export default function MaterialStorePage() {
   const [startDate, setStartDate] = useState(firstDay);
   const [endDate, setEndDate] = useState(lastDay);
 
-  const [movements, setMovements] = useState<MaterialStockMovement[]>([]);
+  const [allItems, setAllItems] = useState<MaterialStockMovement[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [sortField, setSortField] = useState<SortField>("displayName");
@@ -82,9 +83,11 @@ export default function MaterialStorePage() {
     // Fetch all products for parent map
     const { data: allProds } = await supabase.from("products").select("id, name, parent_product_id");
     const parentNameMap = new Map<string, string>();
+    const childParentMap = new Map<string, string>(); // child_id -> parent_id
     if (allProds) {
       for (const prod of allProds) {
         if (!prod.parent_product_id) parentNameMap.set(prod.id, prod.name);
+        else childParentMap.set(prod.id, prod.parent_product_id);
       }
     }
 
@@ -93,7 +96,7 @@ export default function MaterialStorePage() {
       .select("product_id, products( code, name, category, uom, reorder_level, conversion_kg, parent_product_id )")
       .eq("store", "material_store");
 
-    if (prodErr || !allProducts) { setMovements([]); setLoading(false); return; }
+    if (prodErr || !allProducts) { setAllItems([]); setLoading(false); return; }
 
     const uniqueMap = new Map<string, MaterialStockMovement>();
     for (const row of allProducts) {
@@ -141,34 +144,19 @@ export default function MaterialStorePage() {
       item.closing_kg = item.opening_kg + supplier + rc - wip;
     }
 
-    // Build hierarchy
-    const parentMap = new Map<string, MaterialStockMovement>();
-    const children: MaterialStockMovement[] = [];
-    for (const item of items) {
-      if (item.parent_product_id) children.push(item);
-      else parentMap.set(item.product_id, { ...item, children: [] });
+    // Filter to Raw Material and Chemical only
+    const filtered = items.filter(i => i.category === "Raw Material" || i.category === "Chemical");
+
+    // Mark which items are parents
+    const parentIds = new Set<string>();
+    for (const item of filtered) {
+      if (item.parent_product_id) parentIds.add(item.parent_product_id);
     }
-    for (const child of children) {
-      const parent = parentMap.get(child.parent_product_id!);
-      if (parent) parent.children!.push(child);
-    }
-    const displayList: MaterialStockMovement[] = [];
-    for (const parent of Array.from(parentMap.values())) {
-      // Sum children into parent
-      let sumOpening = parent.opening_kg, sumRecvSup = parent.received_supplier_kg,
-        sumRecvRc = parent.received_rc_kg, sumIssuedWip = parent.issued_wip_kg, sumClosing = parent.closing_kg;
-      for (const child of parent.children || []) {
-        sumOpening += child.opening_kg; sumRecvSup += child.received_supplier_kg;
-        sumRecvRc += child.received_rc_kg; sumIssuedWip += child.issued_wip_kg;
-        sumClosing += child.closing_kg;
-      }
-      parent.opening_kg = sumOpening; parent.received_supplier_kg = sumRecvSup;
-      parent.received_rc_kg = sumRecvRc; parent.issued_wip_kg = sumIssuedWip;
-      parent.closing_kg = sumClosing;
-      displayList.push(parent);
+    for (const item of filtered) {
+      item.isParent = parentIds.has(item.product_id);
     }
 
-    setMovements(displayList.filter(i => i.category === "Raw Material" || i.category === "Chemical"));
+    setAllItems(filtered);
     setLoading(false);
   };
 
@@ -184,25 +172,31 @@ export default function MaterialStorePage() {
     setExpandedParents(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   };
 
-  // Flatten for display: parents + expanded children
-  const displayMovements = useMemo(() => {
-    const list: MaterialStockMovement[] = [];
-    for (const parent of movements) {
-      list.push(parent);
-      if (expandedParents.has(parent.product_id) && parent.children) {
-        list.push(...parent.children);
+  // Display list: parents first, then expanded children
+  const displayItems = useMemo(() => {
+    const parents = allItems.filter(i => !i.parent_product_id);
+    const result: MaterialStockMovement[] = [];
+    for (const parent of parents) {
+      result.push(parent);
+      if (expandedParents.has(parent.product_id)) {
+        const children = allItems.filter(i => i.parent_product_id === parent.product_id);
+        result.push(...children);
       }
     }
+    // Also include any items that are children but their parent is not in the list (orphans)
+    const orphanChildren = allItems.filter(i => i.parent_product_id && !parents.some(p => p.product_id === i.parent_product_id));
+    result.push(...orphanChildren);
+
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      return list.filter(i => i.displayName.toLowerCase().includes(q) || i.code.toLowerCase().includes(q));
+      return result.filter(i => i.displayName.toLowerCase().includes(q) || i.code.toLowerCase().includes(q));
     }
-    return list;
-  }, [movements, expandedParents, searchQuery]);
+    return result;
+  }, [allItems, expandedParents, searchQuery]);
 
   // Sorting
   const filtered = useMemo(() => {
-    const list = [...displayMovements];
+    const list = [...displayItems];
     list.sort((a, b) => {
       let valA: any, valB: any;
       switch (sortField) {
@@ -222,7 +216,7 @@ export default function MaterialStorePage() {
       else return sortDir === "asc" ? valA - valB : valB - valA;
     });
     return list;
-  }, [displayMovements, sortField, sortDir]);
+  }, [displayItems, sortField, sortDir]);
 
   const handleSort = (f: SortField) => { if (sortField === f) setSortDir(p => p === "asc" ? "desc" : "asc"); else { setSortField(f); setSortDir("asc"); } };
   const renderSortIcon = (f: SortField) => sortField !== f ? <ArrowUpDown className="h-3 w-3 text-gray-300 ml-1" /> : sortDir === "asc" ? <ArrowUp className="h-3 w-3 text-brand-600 ml-1" /> : <ArrowDown className="h-3 w-3 text-brand-600 ml-1" />;
@@ -295,7 +289,7 @@ export default function MaterialStorePage() {
                 </tr></thead>
                 <tbody className="divide-y">
                   {filtered.map(item => {
-                    const isParent = item.children && item.children.length > 0;
+                    const isParent = item.isParent;
                     const isChild = !!item.parent_product_id;
                     const isExpanded = expandedParents.has(item.product_id);
                     if (isChild && item.parent_product_id && !expandedParents.has(item.parent_product_id)) return null;
