@@ -54,24 +54,38 @@ export default function AdminPage() {
   }, []);
 
   const fetchUsers = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/users");
-      if (!res.ok) {
-        console.error("API error:", res.status, await res.text());
-        setError(`Failed to load users (status ${res.status})`);
-        setUsers([]);
-        setLoading(false);
-        return;
-      }
-      const data = await res.json();
-      setUsers(Array.isArray(data) ? data : []);
-    } catch (err: any) {
-      console.error("Fetch users failed:", err);
-      setError(err.message || "Network error");
+  setLoading(true);
+  try {
+    // Get the current session's access token
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      setError("No active session");
+      setLoading(false);
+      return;
     }
-    setLoading(false);
-  };
+
+    const res = await fetch("/api/users", {
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!res.ok) {
+      console.error("API error:", res.status, await res.text());
+      setError(`Failed to load users (status ${res.status})`);
+      setUsers([]);
+      setLoading(false);
+      return;
+    }
+    const data = await res.json();
+    setUsers(Array.isArray(data) ? data : []);
+  } catch (err: any) {
+    console.error("Fetch users failed:", err);
+    setError(err.message || "Network error");
+  }
+  setLoading(false);
+};
 
   useEffect(() => {
     if (isAuthorised) fetchUsers();
@@ -84,30 +98,37 @@ export default function AdminPage() {
   };
 
   const handleCreate = async () => {
-    if (!email || !password) return;
-    setSaving(true);
-    setError("");
-    setMessage("");
+  if (!email || !password) return;
+  setSaving(true);
+  setError("");
+  setMessage("");
 
-    const res = await fetch("/api/users", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password, fullName, roles: selectedRoles }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      setMessage("User created!");
-      setEmail("");
-      setPassword("");
-      setFullName("");
-      setSelectedRoles([]);
-      setShowForm(false);
-      fetchUsers();
-    } else {
-      setError(data.error);
-    }
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) {
+    setError("No active session");
     setSaving(false);
-  };
+    return;
+  }
+
+  const res = await fetch("/api/users", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ email, password, fullName, roles: selectedRoles }),
+  });
+  const data = await res.json();
+  if (data.success) {
+    setMessage("User created!");
+    setEmail(""); setPassword(""); setFullName(""); setSelectedRoles([]);
+    setShowForm(false);
+    fetchUsers();
+  } else {
+    setError(data.error);
+  }
+  setSaving(false);
+};
 
   // Update roles for an existing user
   const handleUpdateRoles = async (userId: string, newRoles: string[]) => {

@@ -1,15 +1,12 @@
-import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
-import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 
+// Service‑role client – can verify tokens and manage users
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!,
   { auth: { persistSession: false, autoRefreshToken: false } }
 )
-
-type CookieOption = { name: string; value: string; options?: Record<string, unknown> }
 
 // Helper to check if user is admin or super_admin
 async function isAuthorised(userId: string) {
@@ -22,25 +19,49 @@ async function isAuthorised(userId: string) {
   return data && data.length > 0
 }
 
-export async function POST(request: Request) {
-  const cookieStore = await cookies()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll(cookiesToSet: CookieOption[]) {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options)
-          )
-        },
-      },
-    }
-  )
+// ── GET – list all users ──────────────────────────────────────
+export async function GET(request: Request) {
+  const authHeader = request.headers.get('Authorization')
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return NextResponse.json({ error: 'Unauthorized – missing token' }, { status: 401 })
+  }
+  const token = authHeader.split(' ')[1]
 
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token)
+  if (authError || !user) {
+    return NextResponse.json({ error: 'Unauthorized – invalid token' }, { status: 401 })
+  }
+
+  if (!(await isAuthorised(user.id))) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  // Fetch all users and their roles
+  const { data: users } = await supabaseAdmin.auth.admin.listUsers()
+  const { data: allRoles } = await supabaseAdmin.from('user_roles').select('*')
+
+  const enriched = users?.users.map(u => ({
+    id: u.id,
+    email: u.email,
+    fullName: u.user_metadata?.full_name || '',
+    roles: allRoles?.filter(r => r.user_id === u.id).map(r => r.role) || [],
+  })) || []
+
+  return NextResponse.json(enriched)
+}
+
+// ── POST – create a new user ─────────────────────────────────
+export async function POST(request: Request) {
+  const authHeader = request.headers.get('Authorization')
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return NextResponse.json({ error: 'Unauthorized – missing token' }, { status: 401 })
+  }
+  const token = authHeader.split(' ')[1]
+
+  const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token)
+  if (authError || !user) {
+    return NextResponse.json({ error: 'Unauthorized – invalid token' }, { status: 401 })
+  }
 
   if (!(await isAuthorised(user.id))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -76,43 +97,4 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json({ success: true, userId: newUser.user.id })
-}
-
-export async function GET() {
-  const cookieStore = await cookies()
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll(cookiesToSet: CookieOption[]) {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options)
-          )
-        },
-      },
-    }
-  )
-
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (authError || !user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
-  if (!(await isAuthorised(user.id))) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
-
-  const { data: users } = await supabaseAdmin.auth.admin.listUsers()
-  const { data: allRoles } = await supabaseAdmin.from('user_roles').select('*')
-
-  const enriched = users?.users.map(u => ({
-    id: u.id,
-    email: u.email,
-    fullName: u.user_metadata?.full_name || '',
-    roles: allRoles?.filter(r => r.user_id === u.id).map(r => r.role) || [],
-  })) || []
-
-  return NextResponse.json(enriched)
 }
