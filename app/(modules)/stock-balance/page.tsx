@@ -6,7 +6,7 @@ import {
   ChevronDown, ChevronRight
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { formatDate } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 
 type StoreClosing = {
   material_store: number;
@@ -200,7 +200,7 @@ export default function StockPositionPage() {
     }
 
     const displayList: ProductPosition[] = [];
-    for (const [, parent] of Array.from(parentMap.entries())) {
+    for (const parent of Array.from(parentMap.values())) {
       displayList.push(parent);
       if (parent.children && parent.children.length > 0) displayList.push(...parent.children);
     }
