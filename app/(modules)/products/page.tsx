@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect, useMemo, useRef } from "react";
 import Header from "@/components/layout/Header";
-import { Plus, ShoppingBag, RotateCcw, Settings2, Search, ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, ChevronRight, Download, Upload, Trash2 } from "lucide-react";
+import { Plus, ShoppingBag, RotateCcw, Settings2, Search, ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, ChevronRight, Download, Upload, Trash2, Pencil, X, Check } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { Product } from "@/types";
@@ -51,6 +51,7 @@ export default function ProductsPage() {
     reorder: false,
     rc: false,
     status: true,
+    actions: true,
   });
   const [showColumnMenu, setShowColumnMenu] = useState(false);
 
@@ -69,6 +70,18 @@ export default function ProductsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState("");
+
+  // Edit state
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: "",
+    category: "",
+    uom: "kg",
+    is_rc: false,
+    reorder_level: "0",
+    conversion_kg: "",
+    is_active: true,
+  });
 
   const supabase = createClient();
 
@@ -193,6 +206,72 @@ export default function ProductsPage() {
     }
   };
 
+  // ── Edit Product ─────────────────────────────────────────
+  const startEdit = (p: ProductWithParent) => {
+    setEditingId(p.id);
+    setEditForm({
+      name: p.name,
+      category: p.category,
+      uom: p.uom,
+      is_rc: p.is_rc,
+      reorder_level: String(p.reorder_level),
+      conversion_kg: p.conversion_kg ? String(p.conversion_kg) : "",
+      is_active: p.is_active,
+    });
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+  };
+
+  const saveEdit = async (id: string) => {
+    setSaving(true);
+    try {
+      const payload: any = {
+        name: editForm.name,
+        category: editForm.category,
+        uom: editForm.uom,
+        is_rc: editForm.is_rc,
+        reorder_level: parseFloat(editForm.reorder_level),
+        is_active: editForm.is_active,
+      };
+      if (editForm.conversion_kg) {
+        payload.conversion_kg = parseFloat(editForm.conversion_kg);
+      } else {
+        payload.conversion_kg = null;
+      }
+
+      const { error } = await supabase
+        .from("products")
+        .update(payload)
+        .eq("id", id);
+
+      if (error) throw error;
+      setEditingId(null);
+      fetchProducts();
+    } catch (err: any) {
+      alert("Failed to update: " + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Delete Product ───────────────────────────────────────
+  const handleDelete = async (id: string, name: string) => {
+    if (!confirm(`Delete product "${name}"?\n\nThis cannot be undone.`)) return;
+
+    const { error } = await supabase
+      .from("products")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      alert("Failed to delete: " + error.message);
+    } else {
+      fetchProducts();
+    }
+  };
+
   const toggleColumn = (key: keyof typeof visibleColumns) => {
     setVisibleColumns((prev) => ({ ...prev, [key]: !prev[key] }));
   };
@@ -280,7 +359,6 @@ export default function ProductsPage() {
             continue;
           }
 
-          // Find parent product if specified
           let parentId = null;
           if (parentName) {
             const { data: parent } = await supabase
@@ -302,15 +380,8 @@ export default function ProductsPage() {
           if (parentId) payload.parent_product_id = parentId;
 
           const { error } = await supabase.from("products").insert([payload]);
-          if (error) {
-            console.error("Import error:", error);
-            errors++;
-          } else {
-            created++;
-          }
-        } catch {
-          errors++;
-        }
+          if (error) { errors++; } else { created++; }
+        } catch { errors++; }
       }
 
       setImportMsg(`✅ ${created} products created. ${errors > 0 ? `${errors} rows skipped.` : ""}`);
@@ -324,58 +395,44 @@ export default function ProductsPage() {
   };
 
   // ── Nuke ─────────────────────────────────────────────────
-const handleNuke = async () => {
-  if (!confirm("⚠️ This will DELETE ALL transaction data (stock, gate passes, production runs, transfers).\n\nProducts, suppliers, customers, and users will be kept.\n\nAre you absolutely sure?")) return;
+  const handleNuke = async () => {
+    if (!confirm("⚠️ This will DELETE ALL transaction data.\n\nAre you absolutely sure?")) return;
+    const deleteProducts = confirm("Also delete ALL PRODUCTS?\n\nOK = Yes, Cancel = No");
+    const input = prompt('Type "DELETE" to confirm:');
+    if (input !== "DELETE") return;
 
-  // Ask if products should also be deleted
-  const deleteProducts = confirm("Do you also want to delete ALL PRODUCTS?\n\nClick OK to delete products too, or Cancel to keep products.");
+    try {
+      const tables = [
+        "dispatch_items", "dispatch_orders",
+        "wip_material_consumption", "wip_batches",
+        "requisition_items", "requisitions",
+        "fg_transfers", "rc_movements",
+        "ogp_line_items", "outward_gate_passes",
+        "igp_line_items", "inward_gate_passes",
+        "production_runs", "store_transfers",
+        "stock_ledger",
+      ];
 
-  const input = prompt('Type "DELETE" to confirm:');
-  if (input !== "DELETE") return;
-
-  try {
-    const tables = [
-      "dispatch_items", "dispatch_orders",
-      "wip_material_consumption", "wip_batches",
-      "requisition_items", "requisitions",
-      "fg_transfers", "rc_movements",
-      "ogp_line_items", "outward_gate_passes",
-      "igp_line_items", "inward_gate_passes",
-      "production_runs", "store_transfers",
-      "stock_ledger",
-    ];
-
-    for (const table of tables) {
-      const { error } = await supabase
-        .from(table)
-        .delete()
-        .neq("id", "00000000-0000-0000-0000-000000000000");
-      if (error) {
-        console.error(`Failed to delete ${table}:`, error.message);
-        alert(`Failed to delete ${table}: ${error.message}`);
-        return;
+      for (const table of tables) {
+        const { error } = await supabase
+          .from(table)
+          .delete()
+          .neq("id", "00000000-0000-0000-0000-000000000000");
+        if (error) { alert(`Failed to delete ${table}: ${error.message}`); return; }
       }
-    }
 
-    // Optional: delete all products
-    if (deleteProducts) {
-      const { error: prodErr } = await supabase
-        .from("products")
-        .delete()
-        .neq("id", "00000000-0000-0000-0000-000000000000");
-      if (prodErr) {
-        alert("Failed to delete products: " + prodErr.message);
-        return;
+      if (deleteProducts) {
+        const { error: prodErr } = await supabase
+          .from("products")
+          .delete()
+          .neq("id", "00000000-0000-0000-0000-000000000000");
+        if (prodErr) { alert("Failed to delete products: " + prodErr.message); return; }
       }
-    }
 
-    alert(`✅ All transaction data cleared.${deleteProducts ? " Products also deleted." : ""}`);
-    fetchProducts();
-  } catch (err: any) {
-    alert("Failed: " + err.message);
-  }
-};
-
+      alert(`✅ All transaction data cleared.${deleteProducts ? " Products also deleted." : ""}`);
+      fetchProducts();
+    } catch (err: any) { alert("Failed: " + err.message); }
+  };
 
   // Search filter
   const filteredProducts = useMemo(() => {
@@ -440,9 +497,7 @@ const handleNuke = async () => {
                 >
                   <option value="">-- Select Category --</option>
                   {CATEGORIES.map((cat) => (
-                    <option key={cat.value} value={cat.value}>
-                      {cat.label}
-                    </option>
+                    <option key={cat.value} value={cat.value}>{cat.label}</option>
                   ))}
                 </select>
               </div>
@@ -457,9 +512,7 @@ const handleNuke = async () => {
                   >
                     <option value="">-- None (standalone) --</option>
                     {parentOptions.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} ({p.code})
-                      </option>
+                      <option key={p.id} value={p.id}>{p.name} ({p.code})</option>
                     ))}
                   </select>
                 </div>
@@ -467,74 +520,37 @@ const handleNuke = async () => {
 
               <div>
                 <label className="label">Name *</label>
-                <input
-                  className="input"
-                  required
-                  placeholder="Product name"
-                  value={form.name}
-                  onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
-                />
+                <input className="input" required placeholder="Product name" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} />
               </div>
 
               <div>
                 <label className="label">UOM *</label>
-                <select
-                  className="input"
-                  value={form.uom}
-                  onChange={(e) => setForm((p) => ({ ...p, uom: e.target.value }))}
-                >
-                  {UOM_LIST.map((u) => (
-                    <option key={u} value={u}>{u}</option>
-                  ))}
+                <select className="input" value={form.uom} onChange={(e) => setForm((p) => ({ ...p, uom: e.target.value }))}>
+                  {UOM_LIST.map((u) => (<option key={u} value={u}>{u}</option>))}
                 </select>
               </div>
 
               {form.uom === "bags" && (
                 <div>
                   <label className="label">Kg per bag</label>
-                  <input
-                    className="input"
-                    type="number"
-                    step="0.001"
-                    min="0"
-                    placeholder="e.g. 25"
-                    value={form.conversion_kg}
-                    onChange={(e) => setForm((p) => ({ ...p, conversion_kg: e.target.value }))}
-                  />
-                  <p className="text-xs text-gray-400 mt-1">Standard bag weight (can be overridden in transactions)</p>
+                  <input className="input" type="number" step="0.001" min="0" placeholder="e.g. 25" value={form.conversion_kg} onChange={(e) => setForm((p) => ({ ...p, conversion_kg: e.target.value }))} />
+                  <p className="text-xs text-gray-400 mt-1">Standard bag weight</p>
                 </div>
               )}
 
               <div>
                 <label className="label">Reorder Level</label>
-                <input
-                  className="input"
-                  type="number"
-                  step="0.001"
-                  min="0"
-                  value={form.reorder_level}
-                  onChange={(e) => setForm((p) => ({ ...p, reorder_level: e.target.value }))}
-                />
+                <input className="input" type="number" step="0.001" min="0" value={form.reorder_level} onChange={(e) => setForm((p) => ({ ...p, reorder_level: e.target.value }))} />
               </div>
 
               <div className="flex items-center gap-2 pt-5">
-                <input
-                  type="checkbox"
-                  id="is_rc"
-                  className="rounded border-gray-300"
-                  checked={form.is_rc}
-                  onChange={(e) => setForm((p) => ({ ...p, is_rc: e.target.checked }))}
-                />
-                <label htmlFor="is_rc" className="text-sm text-gray-700 cursor-pointer">
-                  Returnable Component (RC)
-                </label>
+                <input type="checkbox" id="is_rc" className="rounded border-gray-300" checked={form.is_rc} onChange={(e) => setForm((p) => ({ ...p, is_rc: e.target.checked }))} />
+                <label htmlFor="is_rc" className="text-sm text-gray-700 cursor-pointer">Returnable Component (RC)</label>
               </div>
 
               <div className="col-span-2 flex justify-end gap-2">
                 <button type="button" className="btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
-                <button type="submit" className="btn-primary" disabled={saving}>
-                  {saving ? "Saving…" : "Add Product"}
-                </button>
+                <button type="submit" className="btn-primary" disabled={saving}>{saving ? "Saving…" : "Add Product"}</button>
               </div>
             </form>
           </div>
@@ -544,37 +560,20 @@ const handleNuke = async () => {
         <div className="flex items-center justify-between gap-3">
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search by name or code..."
-              className="input pl-9"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
+            <input type="text" placeholder="Search by name or code..." className="input pl-9" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
           </div>
 
           <div className="relative">
-            <button
-              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 bg-white border border-gray-200 rounded-md px-2.5 py-1.5"
-              onClick={() => setShowColumnMenu(!showColumnMenu)}
-            >
-              <Settings2 className="h-3.5 w-3.5" />
-              Columns
+            <button className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 bg-white border border-gray-200 rounded-md px-2.5 py-1.5" onClick={() => setShowColumnMenu(!showColumnMenu)}>
+              <Settings2 className="h-3.5 w-3.5" /> Columns
             </button>
             {showColumnMenu && (
               <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-md shadow-lg z-20 text-xs">
                 <div className="p-2 space-y-1">
                   {Object.entries(visibleColumns).map(([key, value]) => (
                     <label key={key} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded">
-                      <input
-                        type="checkbox"
-                        checked={value}
-                        onChange={() => toggleColumn(key as keyof typeof visibleColumns)}
-                        className="rounded border-gray-300"
-                      />
-                      <span className="capitalize text-gray-600">
-                        {key === "kgPerBag" ? "Kg/Bag" : key === "rc" ? "RC" : key}
-                      </span>
+                      <input type="checkbox" checked={value} onChange={() => toggleColumn(key as keyof typeof visibleColumns)} className="rounded border-gray-300" />
+                      <span className="capitalize text-gray-600">{key === "kgPerBag" ? "Kg/Bag" : key === "rc" ? "RC" : key === "actions" ? "Actions" : key}</span>
                     </label>
                   ))}
                 </div>
@@ -596,46 +595,15 @@ const handleNuke = async () => {
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
                   <th className="table-th w-8"></th>
-                  {visibleColumns.code && (
-                    <th className="table-th cursor-pointer select-none hover:bg-gray-100">
-                      <span className="inline-flex items-center">Code {renderSortIcon("code")}</span>
-                    </th>
-                  )}
-                  {visibleColumns.name && (
-                    <th className="table-th cursor-pointer select-none hover:bg-gray-100">
-                      <span className="inline-flex items-center">Name {renderSortIcon("name")}</span>
-                    </th>
-                  )}
-                  {visibleColumns.category && (
-                    <th className="table-th cursor-pointer select-none hover:bg-gray-100">
-                      <span className="inline-flex items-center">Category {renderSortIcon("category")}</span>
-                    </th>
-                  )}
-                  {visibleColumns.uom && (
-                    <th className="table-th cursor-pointer select-none hover:bg-gray-100">
-                      <span className="inline-flex items-center">UOM {renderSortIcon("uom")}</span>
-                    </th>
-                  )}
-                  {visibleColumns.kgPerBag && (
-                    <th className="table-th cursor-pointer select-none hover:bg-gray-100">
-                      <span className="inline-flex items-center">Kg/Bag {renderSortIcon("conversion_kg")}</span>
-                    </th>
-                  )}
-                  {visibleColumns.reorder && (
-                    <th className="table-th cursor-pointer select-none hover:bg-gray-100">
-                      <span className="inline-flex items-center">Reorder Level {renderSortIcon("reorder_level")}</span>
-                    </th>
-                  )}
-                  {visibleColumns.rc && (
-                    <th className="table-th cursor-pointer select-none hover:bg-gray-100">
-                      <span className="inline-flex items-center">RC {renderSortIcon("is_rc")}</span>
-                    </th>
-                  )}
-                  {visibleColumns.status && (
-                    <th className="table-th cursor-pointer select-none hover:bg-gray-100">
-                      <span className="inline-flex items-center">Status {renderSortIcon("is_active")}</span>
-                    </th>
-                  )}
+                  {visibleColumns.code && <th className="table-th cursor-pointer select-none hover:bg-gray-100"><span className="inline-flex items-center">Code {renderSortIcon("code")}</span></th>}
+                  {visibleColumns.name && <th className="table-th cursor-pointer select-none hover:bg-gray-100"><span className="inline-flex items-center">Name {renderSortIcon("name")}</span></th>}
+                  {visibleColumns.category && <th className="table-th cursor-pointer select-none hover:bg-gray-100"><span className="inline-flex items-center">Category {renderSortIcon("category")}</span></th>}
+                  {visibleColumns.uom && <th className="table-th cursor-pointer select-none hover:bg-gray-100"><span className="inline-flex items-center">UOM {renderSortIcon("uom")}</span></th>}
+                  {visibleColumns.kgPerBag && <th className="table-th cursor-pointer select-none hover:bg-gray-100"><span className="inline-flex items-center">Kg/Bag {renderSortIcon("conversion_kg")}</span></th>}
+                  {visibleColumns.reorder && <th className="table-th cursor-pointer select-none hover:bg-gray-100"><span className="inline-flex items-center">Reorder Level {renderSortIcon("reorder_level")}</span></th>}
+                  {visibleColumns.rc && <th className="table-th cursor-pointer select-none hover:bg-gray-100"><span className="inline-flex items-center">RC {renderSortIcon("is_rc")}</span></th>}
+                  {visibleColumns.status && <th className="table-th cursor-pointer select-none hover:bg-gray-100"><span className="inline-flex items-center">Status {renderSortIcon("is_active")}</span></th>}
+                  {visibleColumns.actions && isSuperAdmin && <th className="table-th text-right">Actions</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -643,11 +611,68 @@ const handleNuke = async () => {
                   const isParent = p.children && p.children.length > 0;
                   const isChild = !!p.parent_product_id;
                   const isExpanded = expandedParents.has(p.id);
+                  const isEditing = editingId === p.id;
 
                   if (isChild && p.parent_product_id && !expandedParents.has(p.parent_product_id)) {
                     return null;
                   }
 
+                  if (isEditing) {
+                    // ── Edit row ──────────────────────────
+                    return (
+                      <tr key={p.id} className="bg-blue-50">
+                        <td className="table-td w-8"></td>
+                        {visibleColumns.code && <td className="table-td font-mono text-xs">{p.code}</td>}
+                        {visibleColumns.name && (
+                          <td className="table-td">
+                            <input className="input text-xs" value={editForm.name} onChange={e => setEditForm(prev => ({ ...prev, name: e.target.value }))} />
+                          </td>
+                        )}
+                        {visibleColumns.category && (
+                          <td className="table-td">
+                            <select className="input text-xs" value={editForm.category} onChange={e => setEditForm(prev => ({ ...prev, category: e.target.value }))}>
+                              {CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                            </select>
+                          </td>
+                        )}
+                        {visibleColumns.uom && (
+                          <td className="table-td">
+                            <select className="input text-xs" value={editForm.uom} onChange={e => setEditForm(prev => ({ ...prev, uom: e.target.value }))}>
+                              {UOM_LIST.map(u => <option key={u} value={u}>{u}</option>)}
+                            </select>
+                          </td>
+                        )}
+                        {visibleColumns.kgPerBag && (
+                          <td className="table-td">
+                            <input className="input text-xs w-20" type="number" step="0.001" value={editForm.conversion_kg} onChange={e => setEditForm(prev => ({ ...prev, conversion_kg: e.target.value }))} />
+                          </td>
+                        )}
+                        {visibleColumns.reorder && (
+                          <td className="table-td">
+                            <input className="input text-xs w-20" type="number" step="0.001" value={editForm.reorder_level} onChange={e => setEditForm(prev => ({ ...prev, reorder_level: e.target.value }))} />
+                          </td>
+                        )}
+                        {visibleColumns.rc && (
+                          <td className="table-td">
+                            <input type="checkbox" checked={editForm.is_rc} onChange={e => setEditForm(prev => ({ ...prev, is_rc: e.target.checked }))} />
+                          </td>
+                        )}
+                        {visibleColumns.status && (
+                          <td className="table-td">
+                            <input type="checkbox" checked={editForm.is_active} onChange={e => setEditForm(prev => ({ ...prev, is_active: e.target.checked }))} />
+                          </td>
+                        )}
+                        {visibleColumns.actions && isSuperAdmin && (
+                          <td className="table-td text-right space-x-1">
+                            <button onClick={() => saveEdit(p.id)} disabled={saving} className="text-green-600 hover:text-green-700 text-xs"><Check className="h-4 w-4 inline" /></button>
+                            <button onClick={cancelEdit} className="text-gray-400 hover:text-gray-600 text-xs"><X className="h-4 w-4 inline" /></button>
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  }
+
+                  // ── Normal row ──────────────────────────
                   return (
                     <tr key={p.id} className={cn("hover:bg-gray-50 transition-colors", isChild && "bg-gray-50/50")}>
                       <td className="table-td w-8">
@@ -657,51 +682,22 @@ const handleNuke = async () => {
                           </button>
                         )}
                       </td>
-                      {visibleColumns.code && (
-                        <td className={cn("table-td font-mono text-xs font-medium text-brand-600", isChild && "pl-6")}>
-                          {p.code}
-                        </td>
-                      )}
-                      {visibleColumns.name && (
-                        <td className={cn("table-td font-medium", isChild && "pl-6 text-gray-600")}>
-                          {isChild && <span className="text-gray-300 mr-1">└</span>}
-                          {p.name}
-                        </td>
-                      )}
-                      {visibleColumns.category && (
-                        <td className="table-td text-gray-500">{p.category}</td>
-                      )}
-                      {visibleColumns.uom && (
-                        <td className="table-td text-xs uppercase text-gray-500">{p.uom}</td>
-                      )}
+                      {visibleColumns.code && <td className={cn("table-td font-mono text-xs font-medium text-brand-600", isChild && "pl-6")}>{p.code}</td>}
+                      {visibleColumns.name && <td className={cn("table-td font-medium", isChild && "pl-6 text-gray-600")}>{isChild && <span className="text-gray-300 mr-1">└</span>}{p.name}</td>}
+                      {visibleColumns.category && <td className="table-td text-gray-500">{p.category}</td>}
+                      {visibleColumns.uom && <td className="table-td text-xs uppercase text-gray-500">{p.uom}</td>}
                       {visibleColumns.kgPerBag && (
-                        <td className="table-td">
-                          {p.uom === "bags" && p.conversion_kg ? (
-                            <span className="inline-flex items-center gap-1 text-xs text-gray-600">
-                              <span className="font-medium">{p.conversion_kg}</span> kg
-                            </span>
-                          ) : (
-                            <span className="text-gray-300">—</span>
-                          )}
-                        </td>
+                        <td className="table-td">{p.uom === "bags" && p.conversion_kg ? <span className="inline-flex items-center gap-1 text-xs text-gray-600"><span className="font-medium">{p.conversion_kg}</span> kg</span> : <span className="text-gray-300">—</span>}</td>
                       )}
-                      {visibleColumns.reorder && (
-                        <td className="table-td">{p.reorder_level}</td>
-                      )}
-                      {visibleColumns.rc && (
-                        <td className="table-td">
-                          {p.is_rc && (
-                            <span className="inline-flex items-center gap-1 text-xs text-purple-600">
-                              <RotateCcw className="h-3 w-3" /> RC
-                            </span>
-                          )}
-                        </td>
-                      )}
+                      {visibleColumns.reorder && <td className="table-td">{p.reorder_level}</td>}
+                      {visibleColumns.rc && <td className="table-td">{p.is_rc && <span className="inline-flex items-center gap-1 text-xs text-purple-600"><RotateCcw className="h-3 w-3" /> RC</span>}</td>}
                       {visibleColumns.status && (
-                        <td className="table-td">
-                          <span className={cn("badge", p.is_active ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-100 text-gray-400")}>
-                            {p.is_active ? "Active" : "Inactive"}
-                          </span>
+                        <td className="table-td"><span className={cn("badge", p.is_active ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-100 text-gray-400")}>{p.is_active ? "Active" : "Inactive"}</span></td>
+                      )}
+                      {visibleColumns.actions && isSuperAdmin && (
+                        <td className="table-td text-right space-x-2">
+                          <button onClick={() => startEdit(p)} className="text-blue-600 hover:text-blue-700 text-xs"><Pencil className="h-3.5 w-3.5" /></button>
+                          <button onClick={() => handleDelete(p.id, p.name)} className="text-red-600 hover:text-red-700 text-xs"><Trash2 className="h-3.5 w-3.5" /></button>
                         </td>
                       )}
                     </tr>
