@@ -3,7 +3,8 @@ import { useState, useEffect, useMemo } from "react";
 import Header from "@/components/layout/Header";
 import {
   Search, ArrowUpDown, ArrowUp, ArrowDown, Package,
-  AlertTriangle, Send, Bell, X, Printer, Settings2
+  AlertTriangle, Send, Bell, X, Printer, Settings2,
+  ChevronDown, ChevronRight
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
@@ -22,6 +23,10 @@ type MaterialStockMovement = {
   received_rc_kg: number;
   issued_wip_kg: number;
   closing_kg: number;
+  // hierarchy
+  parent_product_id?: string | null;
+  children?: MaterialStockMovement[];
+  isChild?: boolean;
 };
 
 type PendingTransfer = {
@@ -60,6 +65,9 @@ export default function MaterialStorePage() {
   const [sortField, setSortField] = useState<SortField>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
+  // ── NEW: expand/collapse state (mirrors Products page) ──
+  const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
+
   const [visibleColumns, setVisibleColumns] = useState({
     code: true,
     name: true,
@@ -91,9 +99,10 @@ export default function MaterialStorePage() {
     endInclusive.setDate(endInclusive.getDate() + 1);
     const end = endInclusive.toISOString().slice(0, 10);
 
+    // ── CHANGE: also fetch parent_product_id from products ──
     const { data: allProducts, error: prodErr } = await supabase
       .from("stock_ledger")
-      .select("product_id, products( code, name, category, uom, reorder_level, conversion_kg )")
+      .select("product_id, products( code, name, category, uom, reorder_level, conversion_kg, parent_product_id )")
       .eq("store", "material_store");
 
     if (prodErr || !allProducts) {
@@ -119,6 +128,8 @@ export default function MaterialStorePage() {
           received_rc_kg: 0,
           issued_wip_kg: 0,
           closing_kg: 0,
+          // ── NEW ──
+          parent_product_id: prod?.parent_product_id ?? null,
         });
       }
     }
@@ -165,7 +176,45 @@ export default function MaterialStorePage() {
       i => i.category === "Raw Material" || i.category === "Chemical"
     );
 
-    setMovements(filteredItems);
+    // ── NEW: build parent→children map, aggregate totals ──
+    const parentMap = new Map<string, MaterialStockMovement>();
+    const childItems: MaterialStockMovement[] = [];
+
+    for (const item of filteredItems) {
+      if (!item.parent_product_id) {
+        parentMap.set(item.product_id, { ...item, children: [] });
+      } else {
+        childItems.push({ ...item, isChild: true });
+      }
+    }
+
+    for (const child of childItems) {
+      const parent = parentMap.get(child.parent_product_id!);
+      if (parent) {
+        parent.children!.push(child);
+        // Accumulate child totals into parent
+        parent.opening_kg += child.opening_kg;
+        parent.received_supplier_kg += child.received_supplier_kg;
+        parent.received_rc_kg += child.received_rc_kg;
+        parent.issued_wip_kg += child.issued_wip_kg;
+        parent.closing_kg += child.closing_kg;
+      }
+      // If parent not in store yet, treat child as standalone
+      else {
+        parentMap.set(child.product_id, { ...child, isChild: false, parent_product_id: null, children: [] });
+      }
+    }
+
+    // Flatten: parents then their children (display order)
+    const displayList: MaterialStockMovement[] = [];
+    for (const [, parent] of parentMap.entries()) {
+      displayList.push(parent);
+      if (parent.children && parent.children.length > 0) {
+        displayList.push(...parent.children);
+      }
+    }
+
+    setMovements(displayList);
     setLoading(false);
   };
 
@@ -194,13 +243,40 @@ export default function MaterialStorePage() {
     fetchIncoming();
   }, [startDate, endDate]);
 
+  // ── NEW: toggle expand ──
+  const toggleExpand = (productId: string) => {
+    setExpandedParents(prev => {
+      const next = new Set(prev);
+      if (next.has(productId)) next.delete(productId);
+      else next.add(productId);
+      return next;
+    });
+  };
+
   const filtered = useMemo(() => {
+    // For search: include parent if any child matches, always include standalone items
     let list = [...movements];
+
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      list = list.filter(i => i.name.toLowerCase().includes(q) || i.code.toLowerCase().includes(q));
+      // Collect matching product_ids
+      const matchingIds = new Set(
+        list
+          .filter(i => i.name.toLowerCase().includes(q) || i.code.toLowerCase().includes(q))
+          .map(i => i.product_id)
+      );
+      // Also include parents of matching children
+      list.forEach(i => {
+        if (i.isChild && i.parent_product_id && matchingIds.has(i.product_id)) {
+          matchingIds.add(i.parent_product_id);
+        }
+      });
+      list = list.filter(i => matchingIds.has(i.product_id));
     }
-    list.sort((a, b) => {
+
+    // Sort only parents (children keep their natural order under parent)
+    const parents = list.filter(i => !i.isChild);
+    parents.sort((a, b) => {
       let valA: any, valB: any;
       switch (sortField) {
         case "code": valA = a.code; valB = b.code; break;
@@ -219,7 +295,22 @@ export default function MaterialStorePage() {
         return sortDir === "asc" ? valA.localeCompare(valB) : valB.localeCompare(valA);
       else return sortDir === "asc" ? valA - valB : valB - valA;
     });
-    return list;
+
+    // Re-attach children under sorted parents
+    const childMap = new Map<string, MaterialStockMovement[]>();
+    list.filter(i => i.isChild).forEach(child => {
+      const pid = child.parent_product_id!;
+      if (!childMap.has(pid)) childMap.set(pid, []);
+      childMap.get(pid)!.push(child);
+    });
+
+    const result: MaterialStockMovement[] = [];
+    for (const parent of parents) {
+      result.push(parent);
+      const children = childMap.get(parent.product_id) || [];
+      result.push(...children);
+    }
+    return result;
   }, [movements, searchQuery, sortField, sortDir]);
 
   const handleSort = (field: SortField) => {
@@ -301,6 +392,101 @@ export default function MaterialStorePage() {
 
   const handlePrint = () => window.print();
 
+  // ── Render a single data row (shared between parent & child) ──
+  const renderRow = (item: MaterialStockMovement) => {
+    const isParent = !item.isChild && item.children && item.children.length > 0;
+    const isChild = !!item.isChild;
+    const isExpanded = expandedParents.has(item.product_id);
+    const lowStock = item.closing_kg <= item.reorder_level && item.reorder_level > 0;
+    const hasBags = item.uom === "bags" && item.conversion_kg != null;
+    const toBags = (kg: number) => (kg / item.conversion_kg!).toFixed(3);
+
+    // Hide children when parent is collapsed
+    if (isChild && item.parent_product_id && !expandedParents.has(item.parent_product_id)) {
+      return null;
+    }
+
+    return (
+      <tr
+        key={item.product_id}
+        className={cn(
+          "hover:bg-gray-50 transition-colors",
+          isChild && "bg-gray-50/50",
+          lowStock && "bg-amber-50",
+        )}
+      >
+        {/* ── Expand toggle cell (mirrors Products page) ── */}
+        <td className="table-td w-8 print:hidden">
+          {isParent && (
+            <button
+              onClick={() => toggleExpand(item.product_id)}
+              className="p-0.5 text-gray-400 hover:text-gray-600"
+            >
+              {isExpanded
+                ? <ChevronDown className="h-4 w-4" />
+                : <ChevronRight className="h-4 w-4" />
+              }
+            </button>
+          )}
+        </td>
+
+        {visibleColumns.code && (
+          <td className={cn("table-td font-mono text-xs font-medium text-brand-600", isChild && "pl-6")}>
+            {item.code}
+          </td>
+        )}
+        {visibleColumns.name && (
+          <td className={cn("table-td font-medium", isChild && "pl-6 text-gray-600")}>
+            {isChild && <span className="text-gray-300 mr-1">└</span>}
+            {item.name}
+            {lowStock && <AlertTriangle className="h-3 w-3 text-amber-500 inline ml-1" />}
+            {isParent && (
+              <span className="ml-1.5 text-[10px] text-gray-400 font-normal">
+                ({item.children!.length} variants)
+              </span>
+            )}
+          </td>
+        )}
+        {visibleColumns.category && <td className="table-td text-gray-500">{item.category}</td>}
+        {visibleColumns.uom && <td className="table-td uppercase text-xs text-gray-500">{item.uom}</td>}
+        {visibleColumns.reorder_level && <td className="table-td text-right">{item.reorder_level}</td>}
+        {visibleColumns.opening_kg && (
+          <td className="table-td text-right">{item.opening_kg.toFixed(3)}</td>
+        )}
+        {visibleColumns.received_supplier_kg && (
+          <td className="table-td text-right">{item.received_supplier_kg.toFixed(3)}</td>
+        )}
+        {visibleColumns.received_rc_kg && (
+          <td className="table-td text-right">{item.received_rc_kg.toFixed(3)}</td>
+        )}
+        {visibleColumns.issued_wip_kg && (
+          <td className="table-td text-right">{item.issued_wip_kg.toFixed(3)}</td>
+        )}
+        {visibleColumns.closing_kg && (
+          <td className={cn("table-td text-right", isParent ? "font-semibold" : "font-medium")}>
+            {item.closing_kg.toFixed(3)}
+          </td>
+        )}
+        {visibleColumns.closing_bags && (
+          <td className="table-td text-right font-medium">
+            {hasBags ? toBags(item.closing_kg) : "—"}
+          </td>
+        )}
+        <td className="table-td print:hidden">
+          {/* Only leaf rows (children or standalone parents) get Issue button */}
+          {!isParent && (
+            <button
+              className="text-xs text-brand-600"
+              onClick={() => { setIssueItem(item); setIssueQtyKg(""); setIssueQtyBags(""); }}
+            >
+              <Send className="h-3 w-3 inline" /> Issue to WIP
+            </button>
+          )}
+        </td>
+      </tr>
+    );
+  };
+
   return (
     <>
       <Header
@@ -370,6 +556,8 @@ export default function MaterialStorePage() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
+                    {/* Expand toggle column header */}
+                    <th className="table-th w-8 print:hidden"></th>
                     {visibleColumns.code && <th className="table-th cursor-pointer" onClick={() => handleSort("code")}>Code {renderSortIcon("code")}</th>}
                     {visibleColumns.name && <th className="table-th cursor-pointer" onClick={() => handleSort("name")}>Name {renderSortIcon("name")}</th>}
                     {visibleColumns.category && <th className="table-th cursor-pointer" onClick={() => handleSort("category")}>Category {renderSortIcon("category")}</th>}
@@ -380,49 +568,19 @@ export default function MaterialStorePage() {
                     {visibleColumns.received_rc_kg && <th className="table-th cursor-pointer text-right" onClick={() => handleSort("received_rc_kg")}>Recv RC (KG) {renderSortIcon("received_rc_kg")}</th>}
                     {visibleColumns.issued_wip_kg && <th className="table-th cursor-pointer text-right" onClick={() => handleSort("issued_wip_kg")}>Issued WIP (KG) {renderSortIcon("issued_wip_kg")}</th>}
                     {visibleColumns.closing_kg && <th className="table-th cursor-pointer text-right" onClick={() => handleSort("closing_kg")}>Closing (KG) {renderSortIcon("closing_kg")}</th>}
-                    {visibleColumns.closing_bags && <th className="table-th cursor-pointer text-right">Closing (Bags)</th>}
+                    {visibleColumns.closing_bags && <th className="table-th text-right">Closing (Bags)</th>}
                     <th className="table-th print:hidden"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {filtered.map(item => {
-                    const lowStock = item.closing_kg <= item.reorder_level && item.reorder_level > 0;
-                    const hasBags = item.uom === "bags" && item.conversion_kg != null;
-                    const toBags = (kg: number) => (kg / item.conversion_kg!).toFixed(3);
-
-                    return (
-                      <tr key={item.product_id} className={cn("hover:bg-gray-50", lowStock && "bg-amber-50")}>
-                        {visibleColumns.code && <td className="table-td font-mono text-xs">{item.code}</td>}
-                        {visibleColumns.name && (
-                          <td className="table-td font-medium">
-                            {item.name}
-                            {lowStock && <AlertTriangle className="h-3 w-3 text-amber-500 inline ml-1" />}
-                          </td>
-                        )}
-                        {visibleColumns.category && <td className="table-td">{item.category}</td>}
-                        {visibleColumns.uom && <td className="table-td uppercase text-xs">{item.uom}</td>}
-                        {visibleColumns.reorder_level && <td className="table-td text-right">{item.reorder_level}</td>}
-                        {visibleColumns.opening_kg && <td className="table-td text-right">{item.opening_kg.toFixed(3)}</td>}
-                        {visibleColumns.received_supplier_kg && <td className="table-td text-right">{item.received_supplier_kg.toFixed(3)}</td>}
-                        {visibleColumns.received_rc_kg && <td className="table-td text-right">{item.received_rc_kg.toFixed(3)}</td>}
-                        {visibleColumns.issued_wip_kg && <td className="table-td text-right">{item.issued_wip_kg.toFixed(3)}</td>}
-                        {visibleColumns.closing_kg && <td className="table-td text-right font-medium">{item.closing_kg.toFixed(3)}</td>}
-                        {visibleColumns.closing_bags && <td className="table-td text-right font-medium">{hasBags ? toBags(item.closing_kg) : "—"}</td>}
-                        <td className="table-td print:hidden">
-                          <button className="text-xs text-brand-600" onClick={() => { setIssueItem(item); setIssueQtyKg(""); setIssueQtyBags(""); }}>
-                            <Send className="h-3 w-3 inline" /> Issue to WIP
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {filtered.map(item => renderRow(item))}
                 </tbody>
               </table>
             )}
           </div>
         </section>
 
-        {/* Incoming Modal */}
+        {/* Incoming Modal — unchanged */}
         {showIncoming && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 print:hidden">
             <div className="bg-white rounded-xl p-6 w-full max-w-2xl space-y-4">
@@ -450,7 +608,7 @@ export default function MaterialStorePage() {
           </div>
         )}
 
-        {/* Issue Modal */}
+        {/* Issue Modal — unchanged */}
         {issueItem && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 print:hidden">
             <div className="bg-white rounded-xl p-6 w-96 space-y-4">
