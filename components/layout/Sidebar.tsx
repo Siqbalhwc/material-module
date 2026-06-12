@@ -11,7 +11,6 @@ import { cn } from "@/lib/utils";
 import { createBrowserClient } from "@supabase/ssr";
 import { useState, useEffect } from "react";
 
-// Each item lists which roles can see it. "*" means everyone.
 const NAV = [
   { label: "Dashboard",        href: "/dashboard",                icon: LayoutDashboard, roles: ["*"] },
   { label: "Gate Pass",        href: "/gate-pass",                icon: Truck,           roles: ["super_admin","admin","store_keeper","gate_pass_operator"] },
@@ -21,7 +20,7 @@ const NAV = [
   { label: "WIP Batches",      href: "/wip",                      icon: Wrench,          roles: ["super_admin","admin","wip_operator"] },
   { label: "RC Store",         href: "/rc-store",                 icon: RotateCcw,       roles: ["super_admin","admin","rc_store_keeper"] },
   { label: "Finished Goods",   href: "/finished-goods",           icon: Package,         roles: ["super_admin","admin","wip_operator"] },
-  { label: "Stock Balance",    href: "/stock-balance",            icon: BarChart3,       roles: ["super_admin","admin","viewer","store_keeper","wip_operator","rc_store_keeper","gate_pass_operator"] },
+  { label: "Stock Balance",    href: "/stock-balance",            icon: BarChart3,       roles: ["super_admin","admin"] },
   { label: "Products",         href: "/products",                 icon: ShoppingBag,     roles: ["super_admin","admin"] },
 ];
 
@@ -117,27 +116,26 @@ export default function Sidebar() {
           );
         })}
 
-        <div className="border-t border-gray-100 my-2" />
-
-        {/* Admin */}
+        {/* Admin only links */}
         {isAdmin && (
-          <Link
-            href="/dashboard/admin"
-            className={cn("sidebar-item", path === "/dashboard/admin" && "active")}
-          >
-            <Shield className="h-4 w-4 flex-shrink-0" />
-            <span className="flex-1">Admin</span>
-          </Link>
+          <>
+            <div className="border-t border-gray-100 my-2" />
+            <Link
+              href="/dashboard/admin"
+              className={cn("sidebar-item", path === "/dashboard/admin" && "active")}
+            >
+              <Shield className="h-4 w-4 flex-shrink-0" />
+              <span className="flex-1">Admin</span>
+            </Link>
+            <Link
+              href="/dashboard/settings"
+              className={cn("sidebar-item", path.startsWith("/dashboard/settings") && "active")}
+            >
+              <Settings className="h-4 w-4 flex-shrink-0" />
+              <span className="flex-1">Settings</span>
+            </Link>
+          </>
         )}
-
-        {/* Settings */}
-        <Link
-          href="/dashboard/settings"
-          className={cn("sidebar-item", path.startsWith("/dashboard/settings") && "active")}
-        >
-          <Settings className="h-4 w-4 flex-shrink-0" />
-          <span className="flex-1">Settings</span>
-        </Link>
       </nav>
 
       {/* Footer */}
