@@ -29,63 +29,62 @@ export default function AdminPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [isAuthorised, setIsAuthorised] = useState(false);
+  const [checking, setChecking] = useState(true);   // <-- new
 
   // Check if current user is super_admin or admin
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) {
-        console.log("No user");
+        setChecking(false);
         return;
       }
       supabase
         .from("user_roles")
         .select("role")
         .eq("user_id", user.id)
-        .then(({ data, error }) => {
-          console.log("roles data:", data, "error:", error);
+        .then(({ data }) => {
           const authorised =
             data?.some(
               r => r.role === "super_admin" || r.role === "admin"
             ) ?? false;
-          console.log("isAuthorised:", authorised);
           setIsAuthorised(authorised);
+          setChecking(false);
         });
     });
   }, []);
 
   const fetchUsers = async () => {
-  setLoading(true);
-  try {
-    // Get the current session's access token
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
-      setError("No active session");
-      setLoading(false);
-      return;
-    }
+    setLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        setError("No active session");
+        setLoading(false);
+        return;
+      }
 
-    const res = await fetch("/api/users", {
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-        "Content-Type": "application/json",
-      },
-    });
+      const res = await fetch("/api/users", {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+      });
 
-    if (!res.ok) {
-      console.error("API error:", res.status, await res.text());
-      setError(`Failed to load users (status ${res.status})`);
-      setUsers([]);
-      setLoading(false);
-      return;
+      if (!res.ok) {
+        console.error("API error:", res.status, await res.text());
+        setError(`Failed to load users (status ${res.status})`);
+        setUsers([]);
+        setLoading(false);
+        return;
+      }
+      const data = await res.json();
+      setUsers(Array.isArray(data) ? data : []);
+    } catch (err: any) {
+      console.error("Fetch users failed:", err);
+      setError(err.message || "Network error");
     }
-    const data = await res.json();
-    setUsers(Array.isArray(data) ? data : []);
-  } catch (err: any) {
-    console.error("Fetch users failed:", err);
-    setError(err.message || "Network error");
-  }
-  setLoading(false);
-};
+    setLoading(false);
+  };
 
   useEffect(() => {
     if (isAuthorised) fetchUsers();
@@ -98,47 +97,60 @@ export default function AdminPage() {
   };
 
   const handleCreate = async () => {
-  if (!email || !password) return;
-  setSaving(true);
-  setError("");
-  setMessage("");
+    if (!email || !password) return;
+    setSaving(true);
+    setError("");
+    setMessage("");
 
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) {
-    setError("No active session");
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      setError("No active session");
+      setSaving(false);
+      return;
+    }
+
+    const res = await fetch("/api/users", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ email, password, fullName, roles: selectedRoles }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      setMessage("User created!");
+      setEmail(""); setPassword(""); setFullName(""); setSelectedRoles([]);
+      setShowForm(false);
+      fetchUsers();
+    } else {
+      setError(data.error);
+    }
     setSaving(false);
-    return;
-  }
+  };
 
-  const res = await fetch("/api/users", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${session.access_token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ email, password, fullName, roles: selectedRoles }),
-  });
-  const data = await res.json();
-  if (data.success) {
-    setMessage("User created!");
-    setEmail(""); setPassword(""); setFullName(""); setSelectedRoles([]);
-    setShowForm(false);
-    fetchUsers();
-  } else {
-    setError(data.error);
-  }
-  setSaving(false);
-};
-
-  // Update roles for an existing user
   const handleUpdateRoles = async (userId: string, newRoles: string[]) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
     await fetch("/api/users", {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify({ userId, roles: newRoles }),
     });
     fetchUsers();
   };
+
+  // Show spinner while checking authorization
+  if (checking) {
+    return (
+      <div className="flex items-center justify-center h-screen text-gray-400">
+        Loading…
+      </div>
+    );
+  }
 
   if (!isAuthorised) {
     return (
@@ -151,7 +163,6 @@ export default function AdminPage() {
   return (
     <>
       <div className="p-6 space-y-6">
-        {/* Header */}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">User Management</h1>
@@ -175,7 +186,6 @@ export default function AdminPage() {
           </div>
         </div>
 
-        {/* Messages */}
         {message && (
           <div className="bg-green-50 text-green-700 p-3 rounded-lg text-sm">
             {message}
@@ -187,7 +197,6 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* Add User Form */}
         {showForm && (
           <div className="card p-6 max-w-xl space-y-4">
             <h2 className="text-sm font-semibold text-gray-700">New User</h2>
@@ -254,7 +263,6 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* Users Table */}
         <div className="card overflow-hidden">
           {loading ? (
             <div className="py-16 text-center text-gray-400">Loading users…</div>
@@ -309,7 +317,6 @@ export default function AdminPage() {
   );
 }
 
-// Inline role editor component
 function RoleEditor({
   currentRoles,
   availableRoles,
