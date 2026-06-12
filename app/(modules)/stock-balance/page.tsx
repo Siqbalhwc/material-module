@@ -195,7 +195,7 @@ export default function StockPositionPage() {
     }
 
     // Compute totalClosing for parents
-    for (const [, parent] of parentMap) {
+    for (const parent of Array.from(parentMap.values())) {
       parent.totalClosing = storeKeys.reduce((sum, store) => sum + parent.stores[store], 0);
     }
 
