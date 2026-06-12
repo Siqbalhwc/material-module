@@ -153,7 +153,7 @@ export default function MaterialStorePage() {
       if (parent) parent.children!.push(child);
     }
     const displayList: MaterialStockMovement[] = [];
-    for (const [, parent] of parentMap) {
+    for (const parent of Array.from(parentMap.values())) {
       // Sum children into parent
       let sumOpening = parent.opening_kg, sumRecvSup = parent.received_supplier_kg,
         sumRecvRc = parent.received_rc_kg, sumIssuedWip = parent.issued_wip_kg, sumClosing = parent.closing_kg;
