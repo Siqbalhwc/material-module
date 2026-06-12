@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Header from "@/components/layout/Header";
 import { Plus, Trash2, ArrowLeft, Save, CheckCircle } from "lucide-react";
@@ -55,6 +55,17 @@ export default function NewGatePassPage() {
       setProducts(prod || []);
     })();
   }, []);
+
+  // Build a parent name map for hierarchical display
+  const parentNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of products) {
+      if (!p.parent_product_id) {
+        map.set(p.id, p.name);
+      }
+    }
+    return map;
+  }, [products]);
 
   const addItem = () =>
     setItems((prev) => [
@@ -156,10 +167,9 @@ export default function NewGatePassPage() {
       const { error: lineErr } = await supabase.from("igp_line_items").insert(lineItemsPayload);
       if (lineErr) throw lineErr;
 
-      // 3. If verified, insert stock ledger entries – now with correct store per category
+      // 3. If verified, insert stock ledger entries
       if (status === "verified") {
         const ledgerPayload = items.map((it) => {
-          // Determine target store: "Store / Consumable" -> parts_store, else material_store
           const targetStore = it.category === "Store / Consumable" ? "parts_store" : "material_store";
           return {
             product_id: it.product_id,
@@ -324,11 +334,17 @@ export default function NewGatePassPage() {
                           disabled={!item.category}
                         >
                           <option value="">-- Select Product --</option>
-                          {productOptions.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.name} ({p.uom})
-                            </option>
-                          ))}
+                          {productOptions.map((p) => {
+                            const isChild = !!p.parent_product_id;
+                            const parentName = isChild
+                              ? parentNameMap.get(p.parent_product_id ?? "") ?? ""
+                              : "";
+                            return (
+                              <option key={p.id} value={p.id}>
+                                {isChild ? `${parentName} > ${p.name}` : p.name} ({p.uom})
+                              </option>
+                            );
+                          })}
                         </select>
                       </div>
 
