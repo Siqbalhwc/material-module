@@ -1,5 +1,6 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import PageHeader from "@/components/layout/PageHeader";
 import { createBrowserClient } from "@supabase/ssr";
 import { Plus, Settings } from "lucide-react";
 import Link from "next/link";
@@ -31,8 +32,10 @@ export default function AdminPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [isAuthorised, setIsAuthorised] = useState(false);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [checking, setChecking] = useState(true);
 
+  // Check roles
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) { setChecking(false); return; }
@@ -41,8 +44,10 @@ export default function AdminPage() {
         .select("role")
         .eq("user_id", user.id)
         .then(({ data }) => {
-          const authorised = data?.some(r => r.role === "super_admin" || r.role === "admin") ?? false;
-          setIsAuthorised(authorised);
+          const superAdmin = data?.some(r => r.role === "super_admin") ?? false;
+          const admin = data?.some(r => r.role === "super_admin" || r.role === "admin") ?? false;
+          setIsSuperAdmin(superAdmin);
+          setIsAuthorised(admin);
           setChecking(false);
         });
     });
@@ -62,12 +67,24 @@ export default function AdminPage() {
       });
 
       if (!res.ok) { setError(`Failed to load users (status ${res.status})`); setUsers([]); }
-      else { const data = await res.json(); setUsers(Array.isArray(data) ? data : []); }
+      else {
+        let data = await res.json();
+        if (Array.isArray(data)) {
+          // If NOT super_admin, filter out users who have the super_admin role
+          if (!isSuperAdmin) {
+            data = data.filter((u: any) => {
+              const roles = u.roles || [];
+              return !roles.includes("super_admin");
+            });
+          }
+          setUsers(data);
+        }
+      }
     } catch (err: any) { setError(err.message || "Network error"); }
     setLoading(false);
   };
 
-  useEffect(() => { if (isAuthorised) fetchUsers(); }, [isAuthorised]);
+  useEffect(() => { if (isAuthorised) fetchUsers(); }, [isAuthorised, isSuperAdmin]);
 
   const toggleRole = (role: string) => {
     setSelectedRoles(prev => prev.includes(role) ? prev.filter(r => r !== role) : [...prev, role]);
@@ -115,13 +132,11 @@ export default function AdminPage() {
   if (!isAuthorised) return <div className="flex items-center justify-center h-screen text-red-600 font-medium">Access Denied – Admin or Super Admin only</div>;
 
   return (
-    <>
-      <div className="p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">User Management</h1>
-            <p className="text-sm text-gray-500">Invite team members, assign roles, and manage company settings</p>
-          </div>
+    <div className="p-6">
+      <PageHeader
+        title="User Management"
+        subtitle="Invite team members, assign roles, and manage company settings"
+        actions={
           <div className="flex gap-2">
             <button onClick={() => setShowForm(!showForm)} className="btn-primary inline-flex items-center gap-1">
               <Plus className="h-4 w-4" /> Add User
@@ -130,67 +145,78 @@ export default function AdminPage() {
               <Settings className="h-4 w-4" /> Settings
             </Link>
           </div>
-        </div>
+        }
+      />
 
-        {message && <div className="bg-green-50 text-green-700 p-3 rounded-lg text-sm">{message}</div>}
-        {error && <div className="bg-red-50 text-red-700 p-3 rounded-lg text-sm">{error}</div>}
+      {message && <div className="bg-green-50 text-green-700 p-3 rounded-lg text-sm mb-4">{message}</div>}
+      {error && <div className="bg-red-50 text-red-700 p-3 rounded-lg text-sm mb-4">{error}</div>}
 
-        {showForm && (
-          <div className="card p-6 max-w-xl space-y-4">
-            <h2 className="text-sm font-semibold text-gray-700">New User</h2>
-            <div><label className="label">Full Name</label><input className="input" value={fullName} onChange={e => setFullName(e.target.value)} /></div>
-            <div><label className="label">Email</label><input className="input" type="email" value={email} onChange={e => setEmail(e.target.value)} /></div>
-            <div><label className="label">Password</label><input className="input" type="password" value={password} onChange={e => setPassword(e.target.value)} /></div>
-            <div>
-              <label className="label">Roles</label>
-              <div className="flex flex-wrap gap-3 mt-2">
-                {AVAILABLE_ROLES.map(role => (
-                  <label key={role.value} className="flex items-center gap-2 text-sm cursor-pointer">
-                    <input type="checkbox" checked={selectedRoles.includes(role.value)} onChange={() => toggleRole(role.value)} className="rounded border-gray-300" />
-                    <span>
-                      <span className="font-medium">{role.label}</span>
-                      <span className="text-gray-400 text-xs ml-1">– {role.desc}</span>
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div className="flex justify-end gap-2">
-              <button className="btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
-              <button className="btn-primary" disabled={saving} onClick={handleCreate}>{saving ? "Creating…" : "Create User"}</button>
+      {showForm && (
+        <div className="card p-6 max-w-xl mb-6 space-y-4">
+          <h2 className="text-sm font-semibold text-gray-700">New User</h2>
+          <div><label className="label">Full Name</label><input className="input" value={fullName} onChange={e => setFullName(e.target.value)} /></div>
+          <div><label className="label">Email</label><input className="input" type="email" value={email} onChange={e => setEmail(e.target.value)} /></div>
+          <div><label className="label">Password</label><input className="input" type="password" value={password} onChange={e => setPassword(e.target.value)} /></div>
+          <div>
+            <label className="label">Roles</label>
+            <div className="flex flex-wrap gap-3 mt-2">
+              {AVAILABLE_ROLES.map(role => (
+                <label key={role.value} className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="checkbox" checked={selectedRoles.includes(role.value)} onChange={() => toggleRole(role.value)} className="rounded border-gray-300" />
+                  <span>
+                    <span className="font-medium">{role.label}</span>
+                    <span className="text-gray-400 text-xs ml-1">– {role.desc}</span>
+                  </span>
+                </label>
+              ))}
             </div>
           </div>
-        )}
-
-        <div className="card overflow-hidden">
-          {loading ? <div className="py-16 text-center text-gray-400">Loading users…</div> :
-           users.length === 0 ? <div className="py-16 text-center text-gray-400">No users yet</div> :
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-100">
-                <tr><th className="table-th text-left">Name</th><th className="table-th text-left">Email</th><th className="table-th text-left">Roles</th><th className="table-th text-left">Actions</th></tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {users.map(u => (
-                  <tr key={u.id} className="hover:bg-gray-50">
-                    <td className="table-td font-medium">{u.fullName || "—"}</td>
-                    <td className="table-td">{u.email}</td>
-                    <td className="table-td">
-                      <div className="flex flex-wrap gap-1">
-                        {(u.roles || []).map((r: string) => (
-                          <span key={r} className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{r.replace("_", " ")}</span>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="table-td">
-                      <RoleEditor currentRoles={u.roles || []} availableRoles={AVAILABLE_ROLES.map(r => r.value)} onSave={newRoles => handleUpdateRoles(u.id, newRoles)} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>}
+          <div className="flex justify-end gap-2">
+            <button className="btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
+            <button className="btn-primary" disabled={saving} onClick={handleCreate}>{saving ? "Creating…" : "Create User"}</button>
+          </div>
         </div>
+      )}
+
+      <div className="card overflow-hidden">
+        {loading ? <div className="py-16 text-center text-gray-400">Loading users…</div> :
+          users.length === 0 ? <div className="py-16 text-center text-gray-400">No users yet</div> :
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 border-b border-gray-100">
+              <tr>
+                <th className="table-th whitespace-nowrap text-left">Name</th>
+                <th className="table-th whitespace-nowrap text-left">Email</th>
+                <th className="table-th whitespace-nowrap text-left">Roles</th>
+                {isSuperAdmin && <th className="table-th whitespace-nowrap text-left">Actions</th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {users.map(u => (
+                <tr key={u.id} className="hover:bg-gray-50">
+                  <td className="table-td text-xs font-medium text-gray-700">{u.fullName || "—"}</td>
+                  <td className="table-td text-xs font-medium text-gray-700">{u.email}</td>
+                  <td className="table-td text-xs font-medium text-gray-700">
+                    <div className="flex flex-wrap gap-1">
+                      {(u.roles || []).map((r: string) => (
+                        <span key={r} className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{r.replace("_", " ")}</span>
+                      ))}
+                    </div>
+                  </td>
+                  {isSuperAdmin && (
+                    <td className="table-td text-xs font-medium">
+                      <RoleEditor
+                        currentRoles={u.roles || []}
+                        availableRoles={AVAILABLE_ROLES.map(r => r.value)}
+                        onSave={newRoles => handleUpdateRoles(u.id, newRoles)}
+                      />
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>}
       </div>
-    </>
+    </div>
   );
 }
 
