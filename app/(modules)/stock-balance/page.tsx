@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
-import Header from "@/components/layout/Header";
+import PageHeader from "@/components/layout/PageHeader";
 import {
   Search, ArrowUpDown, ArrowUp, ArrowDown, Printer, Settings2, X,
   ChevronDown, ChevronRight
@@ -82,7 +82,6 @@ export default function StockPositionPage() {
     endInclusive.setDate(endInclusive.getDate() + 1);
     const end = endInclusive.toISOString().slice(0, 10);
 
-    // Fetch production runs for net consumed
     const { data: prodRuns } = await supabase
       .from("production_runs")
       .select("raw_material_product_id, kg_consumed, kg_waste")
@@ -123,7 +122,6 @@ export default function StockPositionPage() {
     }
     const items = Array.from(uniqueMap.values());
 
-    // Opening balances
     for (const item of items) {
       let totalOpening = 0;
       for (const store of storeKeys) {
@@ -137,7 +135,6 @@ export default function StockPositionPage() {
       item.opening = totalOpening;
     }
 
-    // Movements within range
     for (const item of items) {
       const { data: rangeData } = await supabase
         .from("stock_ledger").select("quantity, direction, store, reference_type")
@@ -165,7 +162,6 @@ export default function StockPositionPage() {
       }
     }
 
-    // Material consumed
     for (const item of items) item.material_consumed = netConsumedMap.get(item.product_id) || 0;
 
     // Build hierarchy
@@ -194,7 +190,6 @@ export default function StockPositionPage() {
       }
     }
 
-    // Compute totalClosing for parents
     for (const parent of Array.from(parentMap.values())) {
       parent.totalClosing = storeKeys.reduce((sum, store) => sum + parent.stores[store], 0);
     }
@@ -262,84 +257,111 @@ export default function StockPositionPage() {
   const closeDrillDown = () => { setDrillProduct(null); setDrillStore(null); setDrillEntries([]); };
 
   return (
-    <>
-      <Header title="Stock Position" subtitle="Opening + Inflows – Material Consumed = Store Closings" />
-      <main className="flex-1 p-6 space-y-6 print:space-y-4">
-        <div className="flex items-center justify-between print:hidden">
-          <div className="flex items-center gap-3"><label>From:</label><input type="date" className="input" value={startDate} onChange={e => setStartDate(e.target.value)} /><label>To:</label><input type="date" className="input" value={endDate} onChange={e => setEndDate(e.target.value)} /></div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setShowColumnMenu(!showColumnMenu)} className="btn-secondary text-xs"><Settings2 className="h-3.5 w-3.5" /> Columns</button>
-            <button onClick={() => window.print()} className="btn-secondary text-xs"><Printer className="h-3.5 w-3.5" /> Print</button>
+    <div className="p-6">
+      <PageHeader
+        title="Stock Position"
+        subtitle="Opening + Inflows – Material Consumed = Store Closings"
+      />
+
+      <div className="flex items-center justify-between mb-4 print:hidden">
+        <div className="flex items-center gap-3">
+          <label className="text-sm font-medium">From:</label><input type="date" className="input" value={startDate} onChange={e => setStartDate(e.target.value)} />
+          <label className="text-sm font-medium">To:</label><input type="date" className="input" value={endDate} onChange={e => setEndDate(e.target.value)} />
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <button className="btn-secondary text-xs flex items-center gap-1" onClick={() => setShowColumnMenu(!showColumnMenu)}><Settings2 className="h-3.5 w-3.5" /> Columns</button>
+            {showColumnMenu && (
+              <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-md shadow-lg z-20 text-xs">
+                <div className="p-2 space-y-1">
+                  {Object.entries(visibleColumns).map(([k, v]) => (
+                    <label key={k} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded">
+                      <input type="checkbox" checked={v} onChange={() => toggleCol(k as keyof typeof visibleColumns)} className="rounded border-gray-300" />
+                      <span className="capitalize text-gray-600">{k === "material_consumed" ? "Mat. Consumed" : k.replace(/_/g, " ")}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <button onClick={() => window.print()} className="btn-secondary text-xs flex items-center gap-1"><Printer className="h-3.5 w-3.5" /> Print</button>
+        </div>
+      </div>
+
+      <div className="relative max-w-sm mb-4">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+        <input type="text" placeholder="Search..." className="input pl-9" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+      </div>
+
+      <div className="flex items-center justify-end mb-2 print:hidden">
+        <span className="text-[10px] text-gray-400 font-medium">All quantities in KG</span>
+      </div>
+
+      <div className="card overflow-hidden">
+        {loading ? <div className="py-16 text-center text-gray-400">Loading…</div> : filtered.length === 0 ? <div className="py-16 text-center text-gray-400">No data.</div> :
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs min-w-[1300px]">
+              <thead className="bg-gray-50 border-b border-gray-100">
+                <tr>
+                  <th className="table-th w-8 print:hidden whitespace-nowrap"></th>
+                  {visibleColumns.code && <th className="table-th cursor-pointer whitespace-nowrap min-w-[100px]" onClick={() => handleSort("code")}>Code {sortIcon("code")}</th>}
+                  {visibleColumns.name && <th className="table-th cursor-pointer whitespace-nowrap" onClick={() => handleSort("name")}>Name {sortIcon("name")}</th>}
+                  {visibleColumns.uom && <th className="table-th cursor-pointer whitespace-nowrap" onClick={() => handleSort("uom")}>UOM {sortIcon("uom")}</th>}
+                  {visibleColumns.opening && <th className="table-th cursor-pointer text-right whitespace-nowrap" onClick={() => handleSort("opening")}>Opening {sortIcon("opening")}</th>}
+                  {visibleColumns.inflows && <th className="table-th cursor-pointer text-right whitespace-nowrap" onClick={() => handleSort("inflows")}>Inflows {sortIcon("inflows")}</th>}
+                  {visibleColumns.material_consumed && <th className="table-th cursor-pointer text-right whitespace-nowrap" onClick={() => handleSort("material_consumed")}>Mat. Consumed {sortIcon("material_consumed")}</th>}
+                  {visibleColumns.material_store && <th className="table-th text-right whitespace-nowrap">Material Store</th>}
+                  {visibleColumns.wip && <th className="table-th text-right whitespace-nowrap">WIP</th>}
+                  {visibleColumns.rc_store && <th className="table-th text-right whitespace-nowrap">RC Store</th>}
+                  {visibleColumns.finished_goods && <th className="table-th text-right whitespace-nowrap">Finished Goods</th>}
+                  {visibleColumns.parts_store && <th className="table-th text-right whitespace-nowrap">Parts Store</th>}
+                  {visibleColumns.reconciled && <th className="table-th text-center whitespace-nowrap">Reconciled?</th>}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {filtered.map(item => {
+                  const isParent = !item.isChild && item.children && item.children.length > 0;
+                  const isChild = !!item.isChild;
+                  const isExpanded = expandedParents.has(item.product_id);
+                  if (isChild && item.parent_product_id && !expandedParents.has(item.parent_product_id)) return null;
+                  const sumStores = item.stores.material_store + item.stores.wip + item.stores.rc_store + item.stores.finished_goods + item.stores.parts_store;
+                  const diff = Math.abs(item.opening + item.inflows - item.material_consumed - sumStores);
+                  const reconciled = diff < 0.001;
+
+                  return (
+                    <tr key={item.product_id} className={cn("hover:bg-gray-50", isChild && "bg-gray-50/50")}>
+                      <td className="table-td w-8 text-xs font-medium text-gray-700">{isParent && <button onClick={() => toggleExpand(item.product_id)}>{isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</button>}</td>
+                      {visibleColumns.code && <td className={cn("table-td text-xs font-medium font-mono text-brand-600", isChild && "pl-6")}>{item.code}</td>}
+                      {visibleColumns.name && <td className={cn("table-td text-xs font-medium text-gray-700", isChild && "pl-6")}>{isChild && "└ "}{item.name}{isParent && <span className="ml-1 text-[10px] text-gray-400">({item.children!.length} variants)</span>}</td>}
+                      {visibleColumns.uom && <td className="table-td text-xs font-medium text-gray-700 uppercase">{item.uom}</td>}
+                      {visibleColumns.opening && <td className="table-td text-xs font-medium text-gray-700 text-right">{item.opening.toFixed(2)}</td>}
+                      {visibleColumns.inflows && <td className="table-td text-xs font-medium text-gray-700 text-right">{item.inflows.toFixed(2)}</td>}
+                      {visibleColumns.material_consumed && <td className="table-td text-xs font-medium text-gray-700 text-right">{item.material_consumed.toFixed(2)}</td>}
+                      {visibleColumns.material_store && <td className="table-td text-xs font-medium text-gray-700 text-right cursor-pointer hover:text-brand-600 hover:underline" onClick={() => openDrillDown(item, "material_store")}>{item.stores.material_store.toFixed(2)}</td>}
+                      {visibleColumns.wip && <td className="table-td text-xs font-medium text-gray-700 text-right cursor-pointer hover:text-brand-600 hover:underline" onClick={() => openDrillDown(item, "wip")}>{item.stores.wip.toFixed(2)}</td>}
+                      {visibleColumns.rc_store && <td className="table-td text-xs font-medium text-gray-700 text-right cursor-pointer hover:text-brand-600 hover:underline" onClick={() => openDrillDown(item, "rc_store")}>{item.stores.rc_store.toFixed(2)}</td>}
+                      {visibleColumns.finished_goods && <td className="table-td text-xs font-medium text-gray-700 text-right cursor-pointer hover:text-brand-600 hover:underline" onClick={() => openDrillDown(item, "finished_goods")}>{item.stores.finished_goods.toFixed(2)}</td>}
+                      {visibleColumns.parts_store && <td className="table-td text-xs font-medium text-gray-700 text-right cursor-pointer hover:text-brand-600 hover:underline" onClick={() => openDrillDown(item, "parts_store")}>{item.stores.parts_store.toFixed(2)}</td>}
+                      {visibleColumns.reconciled && <td className="table-td text-xs font-medium text-center">{reconciled ? <span className="text-green-600">✅ Yes</span> : <span className="text-red-600">⚠ {diff.toFixed(2)} kg</span>}</td>}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>}
+      </div>
+
+      {/* Drill‑down Modal */}
+      {drillProduct && drillStore && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[80vh] overflow-y-auto p-6 space-y-4">
+            <div className="flex justify-between"><h2 className="text-lg font-semibold">{drillProduct.name} – {STORE_LABELS[drillStore]}</h2><button onClick={closeDrillDown}><X className="h-5 w-5" /></button></div>
+            <p className="text-sm text-gray-500">Movements from {startDate} to {endDate}</p>
+            {drillLoading ? <p>Loading...</p> : drillEntries.length === 0 ? <p>No movements.</p> :
+              <table className="w-full text-sm"><thead className="bg-gray-50"><tr><th className="px-2 py-1">Date</th><th>Type</th><th className="text-right">Qty</th><th>Dir</th><th>Ref</th><th>Notes</th></tr></thead><tbody>{drillEntries.map((e, i) => <tr key={i}><td className="px-2 py-1">{formatDate(e.created_at)}</td><td>{e.txn_type}</td><td className="text-right">{e.quantity.toFixed(2)}</td><td>{e.direction === 1 ? "In" : "Out"}</td><td className="text-xs">{e.reference_type}</td><td className="text-xs text-gray-500">{e.notes}</td></tr>)}</tbody></table>}
           </div>
         </div>
-
-        <section>
-          <div className="relative max-w-sm mb-3"><Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><input type="text" placeholder="Search..." className="input pl-9" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} /></div>
-          <div className="card overflow-hidden">
-            {loading ? <div className="py-16 text-center text-gray-400">Loading…</div> : filtered.length === 0 ? <div className="py-16 text-center text-gray-400">No data.</div> :
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[1300px]">
-                  <thead className="bg-gray-50"><tr>
-                    <th className="w-8"></th>
-                    {visibleColumns.code && <th className="table-th cursor-pointer" onClick={() => handleSort("code")}>Code {sortIcon("code")}</th>}
-                    {visibleColumns.name && <th className="table-th cursor-pointer" onClick={() => handleSort("name")}>Name {sortIcon("name")}</th>}
-                    {visibleColumns.uom && <th className="table-th cursor-pointer" onClick={() => handleSort("uom")}>UOM {sortIcon("uom")}</th>}
-                    {visibleColumns.opening && <th className="table-th text-right">Opening (KG)</th>}
-                    {visibleColumns.inflows && <th className="table-th text-right">Inflows (KG)</th>}
-                    {visibleColumns.material_consumed && <th className="table-th text-right">Mat. Consumed (net KG)</th>}
-                    {visibleColumns.material_store && <th className="table-th text-right">Material Store (KG)</th>}
-                    {visibleColumns.wip && <th className="table-th text-right">WIP (KG)</th>}
-                    {visibleColumns.rc_store && <th className="table-th text-right">RC Store (KG)</th>}
-                    {visibleColumns.finished_goods && <th className="table-th text-right">Finished Goods (KG)</th>}
-                    {visibleColumns.parts_store && <th className="table-th text-right">Parts Store (KG)</th>}
-                    {visibleColumns.reconciled && <th className="table-th text-center">Reconciled?</th>}
-                  </tr></thead>
-                  <tbody className="divide-y">
-                    {filtered.map(item => {
-                      const isParent = !item.isChild && item.children && item.children.length > 0;
-                      const isChild = !!item.isChild;
-                      const isExpanded = expandedParents.has(item.product_id);
-                      if (isChild && item.parent_product_id && !expandedParents.has(item.parent_product_id)) return null;
-                      const sumStores = item.stores.material_store + item.stores.wip + item.stores.rc_store + item.stores.finished_goods + item.stores.parts_store;
-                      const diff = Math.abs(item.opening + item.inflows - item.material_consumed - sumStores);
-                      const reconciled = diff < 0.001;
-
-                      return (
-                        <tr key={item.product_id} className={cn("hover:bg-gray-50", isChild && "bg-gray-50/50")}>
-                          <td className="table-td w-8">{isParent && <button onClick={() => toggleExpand(item.product_id)}>{isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</button>}</td>
-                          {visibleColumns.code && <td className={cn("table-td font-mono text-xs", isChild && "pl-6")}>{item.code}</td>}
-                          {visibleColumns.name && <td className={cn("table-td font-medium", isChild && "pl-6")}>{isChild && "└ "}{item.name}{isParent && <span className="ml-1 text-[10px] text-gray-400">({item.children!.length} variants)</span>}</td>}
-                          {visibleColumns.uom && <td className="table-td uppercase text-xs">{item.uom}</td>}
-                          {visibleColumns.opening && <td className="table-td text-right">{item.opening.toFixed(3)}</td>}
-                          {visibleColumns.inflows && <td className="table-td text-right">{item.inflows.toFixed(3)}</td>}
-                          {visibleColumns.material_consumed && <td className="table-td text-right">{item.material_consumed.toFixed(3)}</td>}
-                          {visibleColumns.material_store && <td className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline" onClick={() => openDrillDown(item, "material_store")}>{item.stores.material_store.toFixed(3)}</td>}
-                          {visibleColumns.wip && <td className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline" onClick={() => openDrillDown(item, "wip")}>{item.stores.wip.toFixed(3)}</td>}
-                          {visibleColumns.rc_store && <td className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline" onClick={() => openDrillDown(item, "rc_store")}>{item.stores.rc_store.toFixed(3)}</td>}
-                          {visibleColumns.finished_goods && <td className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline" onClick={() => openDrillDown(item, "finished_goods")}>{item.stores.finished_goods.toFixed(3)}</td>}
-                          {visibleColumns.parts_store && <td className="table-td text-right cursor-pointer hover:text-brand-600 hover:underline" onClick={() => openDrillDown(item, "parts_store")}>{item.stores.parts_store.toFixed(3)}</td>}
-                          {visibleColumns.reconciled && <td className="table-td text-center">{reconciled ? <span className="text-green-600">✅ Yes</span> : <span className="text-red-600">⚠ {diff.toFixed(3)} kg</span>}</td>}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>}
-          </div>
-        </section>
-
-        {/* Drill‑down Modal */}
-        {drillProduct && drillStore && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[80vh] overflow-y-auto p-6 space-y-4">
-              <div className="flex justify-between"><h2 className="text-lg font-semibold">{drillProduct.name} – {STORE_LABELS[drillStore]}</h2><button onClick={closeDrillDown}><X className="h-5 w-5" /></button></div>
-              <p className="text-sm text-gray-500">Movements from {startDate} to {endDate}</p>
-              {drillLoading ? <p>Loading...</p> : drillEntries.length === 0 ? <p>No movements.</p> :
-                <table className="w-full text-sm"><thead className="bg-gray-50"><tr><th className="px-2 py-1">Date</th><th>Type</th><th className="text-right">Qty</th><th>Dir</th><th>Ref</th><th>Notes</th></tr></thead><tbody>{drillEntries.map((e, i) => <tr key={i}><td className="px-2 py-1">{formatDate(e.created_at)}</td><td>{e.txn_type}</td><td className="text-right">{e.quantity.toFixed(3)}</td><td>{e.direction === 1 ? "In" : "Out"}</td><td className="text-xs">{e.reference_type}</td><td className="text-xs text-gray-500">{e.notes}</td></tr>)}</tbody></table>}
-            </div>
-          </div>
-        )}
-      </main>
-    </>
+      )}
+    </div>
   );
 }
