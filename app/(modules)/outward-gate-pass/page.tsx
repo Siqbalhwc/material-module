@@ -1,10 +1,9 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
-import Header from "@/components/layout/Header";
+import PageHeader from "@/components/layout/PageHeader";
 import Link from "next/link";
 import {
-  Plus, Send, Eye, Search, ArrowUpDown, ArrowUp, ArrowDown,
-  Settings2, Printer
+  Plus, Send, Eye, Search, ArrowUpDown, ArrowUp, ArrowDown, Settings2, Printer
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { formatDate, cn } from "@/lib/utils";
@@ -32,6 +31,12 @@ type SortField = "ogp_number" | "dispatch_date" | "customer_name" | "vehicle_num
 type SortDir = "asc" | "desc";
 
 export default function OutwardGatePassPage() {
+  const today = new Date();
+  const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
+  const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().slice(0, 10);
+  const [startDate, setStartDate] = useState(firstDay);
+  const [endDate, setEndDate] = useState(lastDay);
+
   const supabase = createClient();
   const [records, setRecords] = useState<OutwardGatePass[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,10 +54,34 @@ export default function OutwardGatePassPage() {
   });
   const [showColumnMenu, setShowColumnMenu] = useState(false);
 
+  const [companyName, setCompanyName] = useState("MaterialFlow");
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    supabase
+      .from("company_settings")
+      .select("company_name, logo_url")
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data) {
+          setCompanyName(data.company_name || "MaterialFlow");
+          setLogoUrl(data.logo_url || null);
+        }
+      });
+  }, []);
+
   const fetchOutwardGatePasses = async () => {
+    setLoading(true);
+    const endInclusive = new Date(endDate);
+    endInclusive.setDate(endInclusive.getDate() + 1);
+    const end = endInclusive.toISOString().slice(0, 10);
+
     const { data, error } = await supabase
       .from("outward_gate_passes")
       .select(`*, customers(name), ogp_line_items(count)`)
+      .gte("dispatch_date", startDate)
+      .lt("dispatch_date", end)
       .order("dispatch_date", { ascending: false });
 
     if (!error && data) {
@@ -71,7 +100,7 @@ export default function OutwardGatePassPage() {
     setLoading(false);
   };
 
-  useEffect(() => { fetchOutwardGatePasses(); }, []);
+  useEffect(() => { fetchOutwardGatePasses(); }, [startDate, endDate]);
 
   const filtered = useMemo(() => {
     let list = [...records];
@@ -114,58 +143,48 @@ export default function OutwardGatePassPage() {
     setVisibleColumns(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const handlePrint = () => window.print();
-
   return (
-    <>
-      <Header
-        title="Outward Gate Pass"
-        subtitle="Finished goods dispatched to customers"
-        actions={
-          <Link href="/outward-gate-pass/new" className="btn-primary">
-            <Plus className="h-4 w-4" /> New Outward Gate Pass
-          </Link>
+    <div className="p-6">
+      <style jsx global>{`
+        @media print {
+          body * { visibility: hidden; }
+          .print-area, .print-area * { visibility: visible; }
+          .print-area { position: absolute; left: 0; top: 0; width: 100%; padding: 20px 30px; }
+          .no-print { display: none !important; }
         }
-      />
-      <main className="flex-1 p-6 space-y-4">
-        <div className="flex items-center justify-between gap-3 print:hidden">
-          <div className="relative flex-1 max-w-sm">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search by OGP No., Customer or Vehicle"
-              className="input pl-9"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-            />
+        @media screen {
+          .print-area { display: none; }
+        }
+      `}</style>
+
+      {/* Screen view */}
+      <div className="no-print">
+        <PageHeader
+          title="Outward Gate Pass"
+          subtitle="Finished goods dispatched to customers"
+          actions={
+            <Link href="/outward-gate-pass/new" className="btn-primary">
+              <Plus className="h-4 w-4" /> New Outward Gate Pass
+            </Link>
+          }
+        />
+
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <div className="flex items-center gap-3">
+            <label className="text-sm font-medium">From:</label>
+            <input type="date" className="input" value={startDate} onChange={e => setStartDate(e.target.value)} />
+            <label className="text-sm font-medium">To:</label>
+            <input type="date" className="input" value={endDate} onChange={e => setEndDate(e.target.value)} />
           </div>
           <div className="flex items-center gap-2">
-            <div className="relative">
-              <button
-                className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 bg-white border border-gray-200 rounded-md px-2.5 py-1.5"
-                onClick={() => setShowColumnMenu(!showColumnMenu)}
-              >
-                <Settings2 className="h-3.5 w-3.5" /> Columns
-              </button>
-              {showColumnMenu && (
-                <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-md shadow-lg z-20 text-xs">
-                  <div className="p-2 space-y-1">
-                    {Object.entries(visibleColumns).map(([key, value]) => (
-                      <label key={key} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded">
-                        <input type="checkbox" checked={value} onChange={() => toggleColumn(key as keyof typeof visibleColumns)} className="rounded border-gray-300" />
-                        <span className="capitalize text-gray-600">
-                          {key === "ogp_number" ? "OGP No." : key === "dispatch_date" ? "Date" : key === "customer_name" ? "Customer" : key === "vehicle_number" ? "Vehicle" : key === "item_count" ? "Items" : "Status"}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-            <button onClick={handlePrint} className="btn-secondary flex items-center gap-1">
-              <Printer className="h-4 w-4" /> Print / PDF
-            </button>
+            <button className="btn-secondary text-xs flex items-center gap-1" onClick={() => setShowColumnMenu(!showColumnMenu)}><Settings2 className="h-3.5 w-3.5" /> Columns</button>
+            <button onClick={() => window.print()} className="btn-secondary text-xs flex items-center gap-1"><Printer className="h-3.5 w-3.5" /> Print</button>
           </div>
+        </div>
+
+        <div className="relative max-w-sm mb-4">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <input type="text" placeholder="Search..." className="input pl-9" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
         </div>
 
         <div className="card overflow-hidden">
@@ -174,80 +193,32 @@ export default function OutwardGatePassPage() {
           ) : filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-gray-400">
               <Send className="h-10 w-10 mb-3 opacity-30" />
-              <p className="text-sm">
-                {searchQuery ? "No gate passes match your search" : "No outward gate passes yet"}
-              </p>
-              {!searchQuery && (
-                <Link href="/outward-gate-pass/new" className="btn-primary mt-4">
-                  <Plus className="h-4 w-4" /> Create first gate pass
-                </Link>
-              )}
+              <p className="text-sm">{searchQuery ? "No gate passes match your search" : "No outward gate passes yet"}</p>
             </div>
           ) : (
-            <table className="w-full">
+            <table className="w-full text-xs">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  {visibleColumns.ogp_number && (
-                    <th className="table-th cursor-pointer select-none hover:bg-gray-100" onClick={() => handleSort("ogp_number")}>
-                      <span className="inline-flex items-center">OGP No. {renderSortIcon("ogp_number")}</span>
-                    </th>
-                  )}
-                  {visibleColumns.dispatch_date && (
-                    <th className="table-th cursor-pointer select-none hover:bg-gray-100" onClick={() => handleSort("dispatch_date")}>
-                      <span className="inline-flex items-center">Date {renderSortIcon("dispatch_date")}</span>
-                    </th>
-                  )}
-                  {visibleColumns.customer_name && (
-                    <th className="table-th cursor-pointer select-none hover:bg-gray-100" onClick={() => handleSort("customer_name")}>
-                      <span className="inline-flex items-center">Customer {renderSortIcon("customer_name")}</span>
-                    </th>
-                  )}
-                  {visibleColumns.vehicle_number && (
-                    <th className="table-th cursor-pointer select-none hover:bg-gray-100" onClick={() => handleSort("vehicle_number")}>
-                      <span className="inline-flex items-center">Vehicle {renderSortIcon("vehicle_number")}</span>
-                    </th>
-                  )}
-                  {visibleColumns.item_count && (
-                    <th className="table-th cursor-pointer select-none hover:bg-gray-100" onClick={() => handleSort("item_count")}>
-                      <span className="inline-flex items-center">Items {renderSortIcon("item_count")}</span>
-                    </th>
-                  )}
-                  {visibleColumns.status && (
-                    <th className="table-th cursor-pointer select-none hover:bg-gray-100" onClick={() => handleSort("status")}>
-                      <span className="inline-flex items-center">Status {renderSortIcon("status")}</span>
-                    </th>
-                  )}
-                  <th className="table-th"></th>
+                  {visibleColumns.ogp_number && <th className="table-th cursor-pointer whitespace-nowrap" onClick={() => handleSort("ogp_number")}>OGP No. {renderSortIcon("ogp_number")}</th>}
+                  {visibleColumns.dispatch_date && <th className="table-th cursor-pointer whitespace-nowrap" onClick={() => handleSort("dispatch_date")}>Date {renderSortIcon("dispatch_date")}</th>}
+                  {visibleColumns.customer_name && <th className="table-th cursor-pointer whitespace-nowrap" onClick={() => handleSort("customer_name")}>Customer {renderSortIcon("customer_name")}</th>}
+                  {visibleColumns.vehicle_number && <th className="table-th cursor-pointer whitespace-nowrap" onClick={() => handleSort("vehicle_number")}>Vehicle {renderSortIcon("vehicle_number")}</th>}
+                  {visibleColumns.item_count && <th className="table-th cursor-pointer whitespace-nowrap" onClick={() => handleSort("item_count")}>Items {renderSortIcon("item_count")}</th>}
+                  {visibleColumns.status && <th className="table-th cursor-pointer whitespace-nowrap" onClick={() => handleSort("status")}>Status {renderSortIcon("status")}</th>}
+                  <th className="table-th whitespace-nowrap"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {filtered.map(r => (
-                  <tr key={r.id} className="hover:bg-gray-50 transition-colors">
-                    {visibleColumns.ogp_number && (
-                      <td className="table-td font-mono text-xs font-medium text-brand-600">{r.ogp_number}</td>
-                    )}
-                    {visibleColumns.dispatch_date && (
-                      <td className="table-td">{formatDate(r.dispatch_date)}</td>
-                    )}
-                    {visibleColumns.customer_name && (
-                      <td className="table-td">{r.customer_name || "—"}</td>
-                    )}
-                    {visibleColumns.vehicle_number && (
-                      <td className="table-td font-mono text-xs">{r.vehicle_number}</td>
-                    )}
-                    {visibleColumns.item_count && (
-                      <td className="table-td text-center">{r.item_count}</td>
-                    )}
-                    {visibleColumns.status && (
-                      <td className="table-td">
-                        <span className={cn("badge", STATUS_STYLE[r.status])}>{r.status}</span>
-                      </td>
-                    )}
-                    <td className="table-td">
-                      <Link href={`/outward-gate-pass/${r.id}`}
-                        className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-brand-600 transition-colors">
-                        <Eye className="h-3.5 w-3.5" /> View
-                      </Link>
+                  <tr key={r.id} className="hover:bg-gray-50">
+                    {visibleColumns.ogp_number && <td className="table-td text-xs font-medium font-mono text-brand-600">{r.ogp_number}</td>}
+                    {visibleColumns.dispatch_date && <td className="table-td text-xs font-medium text-gray-700">{formatDate(r.dispatch_date)}</td>}
+                    {visibleColumns.customer_name && <td className="table-td text-xs font-medium text-gray-700">{r.customer_name || "—"}</td>}
+                    {visibleColumns.vehicle_number && <td className="table-td text-xs font-medium text-gray-700 font-mono">{r.vehicle_number}</td>}
+                    {visibleColumns.item_count && <td className="table-td text-xs font-medium text-gray-700 text-center">{r.item_count}</td>}
+                    {visibleColumns.status && <td className="table-td text-xs font-medium"><span className={cn("badge", STATUS_STYLE[r.status])}>{r.status}</span></td>}
+                    <td className="table-td text-xs font-medium">
+                      <Link href={`/outward-gate-pass/${r.id}`} className="text-brand-600 hover:text-brand-700"><Eye className="h-3.5 w-3.5 inline" /> View</Link>
                     </td>
                   </tr>
                 ))}
@@ -255,7 +226,43 @@ export default function OutwardGatePassPage() {
             </table>
           )}
         </div>
-      </main>
-    </>
+      </div>
+
+      {/* Print area */}
+      <div className="print-area">
+        <div className="flex items-center justify-between border-b pb-4 mb-6">
+          <div className="flex items-center gap-3">
+            {logoUrl ? <img src={logoUrl} alt="Logo" className="h-12 w-12 rounded-lg object-contain" /> : <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-green-400"><Send className="h-6 w-6 text-white" /></div>}
+            <div><h1 className="text-xl font-bold text-gray-900">{companyName}</h1><p className="text-xs text-gray-500">Outward Gate Pass Register</p></div>
+          </div>
+          <div className="text-right"><p className="text-sm font-semibold text-gray-900">{startDate} to {endDate}</p><p className="text-xs text-gray-500">Total Records: {filtered.length}</p></div>
+        </div>
+        <table className="w-full text-xs border border-gray-200 rounded-lg overflow-hidden mb-6">
+          <thead className="bg-gray-50">
+            <tr>
+              {visibleColumns.ogp_number && <th className="px-2 py-2 text-left font-medium text-gray-600 whitespace-nowrap">OGP No.</th>}
+              {visibleColumns.dispatch_date && <th className="px-2 py-2 text-left font-medium text-gray-600 whitespace-nowrap">Date</th>}
+              {visibleColumns.customer_name && <th className="px-2 py-2 text-left font-medium text-gray-600 whitespace-nowrap">Customer</th>}
+              {visibleColumns.vehicle_number && <th className="px-2 py-2 text-left font-medium text-gray-600 whitespace-nowrap">Vehicle</th>}
+              {visibleColumns.item_count && <th className="px-2 py-2 text-center font-medium text-gray-600 whitespace-nowrap">Items</th>}
+              {visibleColumns.status && <th className="px-2 py-2 text-left font-medium text-gray-600 whitespace-nowrap">Status</th>}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {filtered.map(r => (
+              <tr key={r.id}>
+                {visibleColumns.ogp_number && <td className="px-2 py-2 text-xs font-medium font-mono text-gray-700">{r.ogp_number}</td>}
+                {visibleColumns.dispatch_date && <td className="px-2 py-2 text-xs font-medium text-gray-700">{formatDate(r.dispatch_date)}</td>}
+                {visibleColumns.customer_name && <td className="px-2 py-2 text-xs font-medium text-gray-700">{r.customer_name || "—"}</td>}
+                {visibleColumns.vehicle_number && <td className="px-2 py-2 text-xs font-medium text-gray-700 font-mono">{r.vehicle_number}</td>}
+                {visibleColumns.item_count && <td className="px-2 py-2 text-xs font-medium text-gray-700 text-center">{r.item_count}</td>}
+                {visibleColumns.status && <td className="px-2 py-2 text-xs font-medium"><span className={cn("badge", STATUS_STYLE[r.status])}>{r.status}</span></td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="text-xs text-gray-500 border-t pt-3"><p>Printed on {new Date().toLocaleString()}</p></div>
+      </div>
+    </div>
   );
 }
