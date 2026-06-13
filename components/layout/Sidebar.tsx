@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard, Truck, Warehouse, Package, Wrench,
   RotateCcw, BarChart3, ShoppingBag, Send,
-  ChevronRight, Settings, Shield,
+  ChevronRight, Settings, Shield, User,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createBrowserClient } from "@supabase/ssr";
@@ -35,6 +35,8 @@ export default function Sidebar() {
   const [companyName, setCompanyName] = useState("MaterialFlow");
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [userRoles, setUserRoles] = useState<string[]>([]);
+  const [userEmail, setUserEmail] = useState("");
+  const [userName, setUserName] = useState("");
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -49,9 +51,12 @@ export default function Sidebar() {
       }
     };
 
-    const fetchRoles = async () => {
+    const fetchUserInfo = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+      setUserEmail(user.email || "");
+      setUserName(user.user_metadata?.full_name || user.email?.split("@")[0] || "");
+
       const { data } = await supabase
         .from("user_roles")
         .select("role")
@@ -60,7 +65,7 @@ export default function Sidebar() {
     };
 
     fetchSettings();
-    fetchRoles();
+    fetchUserInfo();
   }, []);
 
   const handleSignOut = async () => {
@@ -81,19 +86,19 @@ export default function Sidebar() {
     }}>
       {/* Logo */}
       <div
-        className="flex h-16 items-center gap-2 border-b border-white/10 px-5 cursor-pointer hover:bg-white/5 transition-colors"
+        className="flex h-16 items-center gap-2.5 border-b border-white/10 px-4 cursor-pointer hover:bg-white/5 transition-colors"
         onClick={() => router.push("/dashboard/settings")}
       >
         {logoUrl ? (
-          <img src={logoUrl} alt="Logo" className="h-8 w-8 rounded-lg object-contain" />
+          <img src={logoUrl} alt="Logo" className="h-7 w-7 rounded-lg object-contain flex-shrink-0" />
         ) : (
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20">
-            <Package className="h-4 w-4 text-white" />
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/20 flex-shrink-0">
+            <Package className="h-3.5 w-3.5 text-white" />
           </div>
         )}
-        <div>
-          <p className="text-sm font-semibold text-white">{companyName}</p>
-          <p className="text-[10px] text-white/50">by OneAccounts</p>
+        <div className="min-w-0 flex-1">
+          <p className="text-[13px] font-bold text-white truncate leading-tight">{companyName}</p>
+          <p className="text-[9px] text-white/50 leading-tight">by OneAccounts</p>
         </div>
       </div>
 
@@ -109,15 +114,15 @@ export default function Sidebar() {
               key={href}
               href={href}
               className={cn(
-                "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+                "flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium transition-colors",
                 active
                   ? "bg-white/20 text-white"
                   : "text-white/70 hover:bg-white/10 hover:text-white"
               )}
             >
               <Icon className="h-4 w-4 flex-shrink-0" />
-              <span className="flex-1">{label}</span>
-              {active && <ChevronRight className="h-3 w-3 opacity-60" />}
+              <span className="flex-1 truncate">{label}</span>
+              {active && <ChevronRight className="h-3 w-3 flex-shrink-0 opacity-60" />}
             </Link>
           );
         })}
@@ -129,42 +134,50 @@ export default function Sidebar() {
             <Link
               href="/dashboard/admin"
               className={cn(
-                "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+                "flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium transition-colors",
                 path === "/dashboard/admin"
                   ? "bg-white/20 text-white"
                   : "text-white/70 hover:bg-white/10 hover:text-white"
               )}
             >
               <Shield className="h-4 w-4 flex-shrink-0" />
-              <span className="flex-1">Admin</span>
+              <span className="flex-1 truncate">Admin</span>
             </Link>
             <Link
               href="/dashboard/settings"
               className={cn(
-                "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+                "flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium transition-colors",
                 path.startsWith("/dashboard/settings")
                   ? "bg-white/20 text-white"
                   : "text-white/70 hover:bg-white/10 hover:text-white"
               )}
             >
               <Settings className="h-4 w-4 flex-shrink-0" />
-              <span className="flex-1">Settings</span>
+              <span className="flex-1 truncate">Settings</span>
             </Link>
           </>
         )}
       </nav>
 
-      {/* Footer */}
-      <div className="border-t border-white/10 p-4 space-y-2">
+      {/* Footer – User info */}
+      <div className="border-t border-white/10 p-3 space-y-2">
+        {userName && (
+          <div className="flex items-center gap-2 px-1">
+            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-white/20 flex-shrink-0">
+              <User className="h-3.5 w-3.5 text-white" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-medium text-white truncate leading-tight">{userName}</p>
+              <p className="text-[9px] text-white/50 truncate leading-tight">{userEmail}</p>
+            </div>
+          </div>
+        )}
         <button
           onClick={handleSignOut}
-          className="w-full text-left text-xs text-white/60 hover:text-white transition-colors flex items-center gap-2"
+          className="w-full text-left text-[11px] text-white/60 hover:text-white transition-colors flex items-center gap-2 px-1"
         >
           <span className="text-base">🚪</span> Sign Out
         </button>
-        <p className="text-[10px] text-white/30 text-center">
-          O + R – C &nbsp;|&nbsp; Material Management v0.1
-        </p>
       </div>
     </aside>
   );
