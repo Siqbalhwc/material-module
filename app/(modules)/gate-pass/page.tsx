@@ -55,7 +55,25 @@ export default function GatePassPage() {
   });
   const [showColumnMenu, setShowColumnMenu] = useState(false);
 
+  // Company settings for print header
+  const [companyName, setCompanyName] = useState("MaterialFlow");
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+
   const supabase = createClient();
+
+  useEffect(() => {
+    supabase
+      .from("company_settings")
+      .select("company_name, logo_url")
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data) {
+          setCompanyName(data.company_name || "MaterialFlow");
+          setLogoUrl(data.logo_url || null);
+        }
+      });
+  }, []);
 
   const fetchGatePasses = async () => {
     setLoading(true);
@@ -154,154 +172,213 @@ export default function GatePassPage() {
 
   return (
     <div className="p-6">
-      <PageHeader
-        title="Inward Gate Pass"
-        subtitle="Material received into factory store"
-        actions={
-          <Link href="/gate-pass/new" className="btn-primary">
-            <Plus className="h-4 w-4" /> New Gate Pass
-          </Link>
+      {/* Print styles */}
+      <style jsx global>{`
+        @media print {
+          body * { visibility: hidden; }
+          .print-area, .print-area * { visibility: visible; }
+          .print-area { position: absolute; left: 0; top: 0; width: 100%; padding: 20px 30px; }
+          .screen-only { display: none !important; }
         }
-      />
+        @media screen {
+          .print-only-header { display: none; }
+        }
+      `}</style>
 
-      <div className="flex items-center justify-between gap-3 mb-4">
-        <div className="flex items-center gap-3">
-          <label className="text-sm font-medium">From:</label>
-          <input type="date" className="input" value={startDate} onChange={e => setStartDate(e.target.value)} />
-          <label className="text-sm font-medium">To:</label>
-          <input type="date" className="input" value={endDate} onChange={e => setEndDate(e.target.value)} />
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <button
-              className="btn-secondary text-xs flex items-center gap-1"
-              onClick={() => setShowColumnMenu(!showColumnMenu)}
-            >
-              <Settings2 className="h-3.5 w-3.5" /> Columns
-            </button>
-            {showColumnMenu && (
-              <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-md shadow-lg z-20 text-xs">
-                <div className="p-2 space-y-1">
-                  {Object.entries(visibleColumns).map(([key, value]) => (
-                    <label key={key} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded">
-                      <input
-                        type="checkbox"
-                        checked={value}
-                        onChange={() => toggleColumn(key as keyof typeof visibleColumns)}
-                        className="rounded border-gray-300"
-                      />
-                      <span className="capitalize text-gray-600">
-                        {key === "igp_number" ? "IGP No." : key === "received_date" ? "Date" : key === "supplier_name" ? "Supplier" : key === "vehicle_number" ? "Vehicle" : key === "item_count" ? "Items" : "Status"}
-                      </span>
-                    </label>
-                  ))}
+      {/* Screen view */}
+      <div className="screen-only">
+        <PageHeader
+          title="Inward Gate Pass"
+          subtitle="Material received into factory store"
+          actions={
+            <Link href="/gate-pass/new" className="btn-primary">
+              <Plus className="h-4 w-4" /> New Gate Pass
+            </Link>
+          }
+        />
+
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <div className="flex items-center gap-3">
+            <label className="text-sm font-medium">From:</label>
+            <input type="date" className="input" value={startDate} onChange={e => setStartDate(e.target.value)} />
+            <label className="text-sm font-medium">To:</label>
+            <input type="date" className="input" value={endDate} onChange={e => setEndDate(e.target.value)} />
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <button className="btn-secondary text-xs flex items-center gap-1" onClick={() => setShowColumnMenu(!showColumnMenu)}>
+                <Settings2 className="h-3.5 w-3.5" /> Columns
+              </button>
+              {showColumnMenu && (
+                <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-md shadow-lg z-20 text-xs">
+                  <div className="p-2 space-y-1">
+                    {Object.entries(visibleColumns).map(([key, value]) => (
+                      <label key={key} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded">
+                        <input type="checkbox" checked={value} onChange={() => toggleColumn(key as keyof typeof visibleColumns)} className="rounded border-gray-300" />
+                        <span className="capitalize text-gray-600">{key === "igp_number" ? "IGP No." : key === "received_date" ? "Date" : key === "supplier_name" ? "Supplier" : key === "vehicle_number" ? "Vehicle" : key === "item_count" ? "Items" : "Status"}</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
+              )}
+            </div>
+            <button onClick={() => window.print()} className="btn-secondary text-xs flex items-center gap-1">
+              <Printer className="h-3.5 w-3.5" /> Print
+            </button>
+          </div>
+        </div>
+
+        <div className="relative max-w-sm mb-4">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <input type="text" placeholder="Search..." className="input pl-9" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+        </div>
+      </div>
+
+      {/* Print area */}
+      <div className="print-area">
+        {/* Print header */}
+        <div className="flex items-center justify-between border-b pb-4 mb-6">
+          <div className="flex items-center gap-3">
+            {logoUrl ? (
+              <img src={logoUrl} alt="Logo" className="h-12 w-12 rounded-lg object-contain" />
+            ) : (
+              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-green-400">
+                <Truck className="h-6 w-6 text-white" />
               </div>
             )}
+            <div>
+              <h1 className="text-xl font-bold text-gray-900">{companyName}</h1>
+              <p className="text-xs text-gray-500">Inward Gate Pass Register</p>
+            </div>
           </div>
-          <button onClick={() => window.print()} className="btn-secondary text-xs flex items-center gap-1">
-            <Printer className="h-3.5 w-3.5" /> Print
-          </button>
+          <div className="text-right">
+            <p className="text-sm font-semibold text-gray-900">
+              {startDate} to {endDate}
+            </p>
+            <p className="text-xs text-gray-500">Total Records: {filtered.length}</p>
+          </div>
+        </div>
+
+        {/* Table */}
+        <table className="w-full text-xs border border-gray-200 rounded-lg overflow-hidden mb-6">
+          <thead className="bg-gray-50">
+            <tr>
+              {visibleColumns.igp_number && <th className="px-2 py-2 text-left font-medium text-gray-600 whitespace-nowrap">IGP No.</th>}
+              {visibleColumns.received_date && <th className="px-2 py-2 text-left font-medium text-gray-600 whitespace-nowrap">Date</th>}
+              {visibleColumns.supplier_name && <th className="px-2 py-2 text-left font-medium text-gray-600 whitespace-nowrap">Supplier</th>}
+              {visibleColumns.vehicle_number && <th className="px-2 py-2 text-left font-medium text-gray-600 whitespace-nowrap">Vehicle</th>}
+              {visibleColumns.item_count && <th className="px-2 py-2 text-center font-medium text-gray-600 whitespace-nowrap">Items</th>}
+              {visibleColumns.status && <th className="px-2 py-2 text-left font-medium text-gray-600 whitespace-nowrap">Status</th>}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {filtered.map((r) => (
+              <tr key={r.id}>
+                {visibleColumns.igp_number && <td className="px-2 py-2 text-xs font-medium font-mono text-gray-700">{r.igp_number}</td>}
+                {visibleColumns.received_date && <td className="px-2 py-2 text-xs font-medium text-gray-700">{formatDate(r.received_date)}</td>}
+                {visibleColumns.supplier_name && <td className="px-2 py-2 text-xs font-medium text-gray-700">{r.supplier_name || "—"}</td>}
+                {visibleColumns.vehicle_number && <td className="px-2 py-2 text-xs font-medium text-gray-700 font-mono">{r.vehicle_number}</td>}
+                {visibleColumns.item_count && <td className="px-2 py-2 text-xs font-medium text-gray-700 text-center">{r.item_count}</td>}
+                {visibleColumns.status && <td className="px-2 py-2 text-xs font-medium"><span className={cn("badge", STATUS_STYLE[r.status])}>{r.status}</span></td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        {/* Footer */}
+        <div className="text-xs text-gray-500 border-t pt-3">
+          <p>Printed on {new Date().toLocaleString()}</p>
+          <p className="mt-1">This is a computer‑generated document.</p>
         </div>
       </div>
 
-      <div className="relative max-w-sm mb-4">
-        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-        <input
-          type="text"
-          placeholder="Search by IGP No., Supplier or Vehicle"
-          className="input pl-9"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-        />
-      </div>
-
-      <div className="card overflow-hidden">
-        {loading ? (
-          <div className="flex items-center justify-center py-16 text-gray-400">Loading…</div>
-        ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-gray-400">
-            <Truck className="h-10 w-10 mb-3 opacity-30" />
-            <p className="text-sm">
-              {searchQuery ? "No gate passes match your search" : "No gate passes yet"}
-            </p>
-            {!searchQuery && (
-              <Link href="/gate-pass/new" className="btn-primary mt-4">
-                <Plus className="h-4 w-4" /> Create first gate pass
-              </Link>
-            )}
-          </div>
-        ) : (
-          <table className="w-full text-xs">
-            <thead className="bg-gray-50 border-b border-gray-100">
-              <tr>
-                {visibleColumns.igp_number && (
-                  <th className="table-th cursor-pointer select-none hover:bg-gray-100 whitespace-nowrap" onClick={() => handleSort("igp_number")}>
-                    <span className="inline-flex items-center">IGP No. {renderSortIcon("igp_number")}</span>
-                  </th>
-                )}
-                {visibleColumns.received_date && (
-                  <th className="table-th cursor-pointer select-none hover:bg-gray-100 whitespace-nowrap" onClick={() => handleSort("received_date")}>
-                    <span className="inline-flex items-center">Date {renderSortIcon("received_date")}</span>
-                  </th>
-                )}
-                {visibleColumns.supplier_name && (
-                  <th className="table-th cursor-pointer select-none hover:bg-gray-100 whitespace-nowrap" onClick={() => handleSort("supplier_name")}>
-                    <span className="inline-flex items-center">Supplier {renderSortIcon("supplier_name")}</span>
-                  </th>
-                )}
-                {visibleColumns.vehicle_number && (
-                  <th className="table-th cursor-pointer select-none hover:bg-gray-100 whitespace-nowrap" onClick={() => handleSort("vehicle_number")}>
-                    <span className="inline-flex items-center">Vehicle {renderSortIcon("vehicle_number")}</span>
-                  </th>
-                )}
-                {visibleColumns.item_count && (
-                  <th className="table-th cursor-pointer select-none hover:bg-gray-100 whitespace-nowrap" onClick={() => handleSort("item_count")}>
-                    <span className="inline-flex items-center">Items {renderSortIcon("item_count")}</span>
-                  </th>
-                )}
-                {visibleColumns.status && (
-                  <th className="table-th cursor-pointer select-none hover:bg-gray-100 whitespace-nowrap" onClick={() => handleSort("status")}>
-                    <span className="inline-flex items-center">Status {renderSortIcon("status")}</span>
-                  </th>
-                )}
-                <th className="table-th whitespace-nowrap"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {filtered.map((r) => (
-                <tr key={r.id} className="hover:bg-gray-50 transition-colors">
+      {/* Screen table (repeated for screen view) */}
+      <div className="screen-only">
+        <div className="card overflow-hidden">
+          {loading ? (
+            <div className="flex items-center justify-center py-16 text-gray-400">Loading…</div>
+          ) : filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-gray-400">
+              <Truck className="h-10 w-10 mb-3 opacity-30" />
+              <p className="text-sm">{searchQuery ? "No gate passes match your search" : "No gate passes yet"}</p>
+              {!searchQuery && (
+                <Link href="/gate-pass/new" className="btn-primary mt-4">
+                  <Plus className="h-4 w-4" /> Create first gate pass
+                </Link>
+              )}
+            </div>
+          ) : (
+            <table className="w-full text-xs">
+              <thead className="bg-gray-50 border-b border-gray-100">
+                <tr>
                   {visibleColumns.igp_number && (
-                    <td className="table-td text-xs font-medium font-mono text-brand-600">{r.igp_number}</td>
+                    <th className="table-th cursor-pointer select-none hover:bg-gray-100 whitespace-nowrap" onClick={() => handleSort("igp_number")}>
+                      <span className="inline-flex items-center">IGP No. {renderSortIcon("igp_number")}</span>
+                    </th>
                   )}
                   {visibleColumns.received_date && (
-                    <td className="table-td text-xs font-medium text-gray-700">{formatDate(r.received_date)}</td>
+                    <th className="table-th cursor-pointer select-none hover:bg-gray-100 whitespace-nowrap" onClick={() => handleSort("received_date")}>
+                      <span className="inline-flex items-center">Date {renderSortIcon("received_date")}</span>
+                    </th>
                   )}
                   {visibleColumns.supplier_name && (
-                    <td className="table-td text-xs font-medium text-gray-700">{r.supplier_name || "—"}</td>
+                    <th className="table-th cursor-pointer select-none hover:bg-gray-100 whitespace-nowrap" onClick={() => handleSort("supplier_name")}>
+                      <span className="inline-flex items-center">Supplier {renderSortIcon("supplier_name")}</span>
+                    </th>
                   )}
                   {visibleColumns.vehicle_number && (
-                    <td className="table-td text-xs font-medium text-gray-700 font-mono">{r.vehicle_number}</td>
+                    <th className="table-th cursor-pointer select-none hover:bg-gray-100 whitespace-nowrap" onClick={() => handleSort("vehicle_number")}>
+                      <span className="inline-flex items-center">Vehicle {renderSortIcon("vehicle_number")}</span>
+                    </th>
                   )}
                   {visibleColumns.item_count && (
-                    <td className="table-td text-xs font-medium text-gray-700 text-center">{r.item_count}</td>
+                    <th className="table-th cursor-pointer select-none hover:bg-gray-100 whitespace-nowrap" onClick={() => handleSort("item_count")}>
+                      <span className="inline-flex items-center">Items {renderSortIcon("item_count")}</span>
+                    </th>
                   )}
                   {visibleColumns.status && (
-                    <td className="table-td text-xs font-medium">
-                      <span className={cn("badge", STATUS_STYLE[r.status])}>{r.status}</span>
-                    </td>
+                    <th className="table-th cursor-pointer select-none hover:bg-gray-100 whitespace-nowrap" onClick={() => handleSort("status")}>
+                      <span className="inline-flex items-center">Status {renderSortIcon("status")}</span>
+                    </th>
                   )}
-                  <td className="table-td text-xs font-medium">
-                    <Link href={`/gate-pass/${r.id}`}
-                      className="inline-flex items-center gap-1 text-brand-600 hover:text-brand-700">
-                      <Eye className="h-3.5 w-3.5" /> View
-                    </Link>
-                  </td>
+                  <th className="table-th whitespace-nowrap"></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {filtered.map((r) => (
+                  <tr key={r.id} className="hover:bg-gray-50 transition-colors">
+                    {visibleColumns.igp_number && (
+                      <td className="table-td text-xs font-medium font-mono text-brand-600">{r.igp_number}</td>
+                    )}
+                    {visibleColumns.received_date && (
+                      <td className="table-td text-xs font-medium text-gray-700">{formatDate(r.received_date)}</td>
+                    )}
+                    {visibleColumns.supplier_name && (
+                      <td className="table-td text-xs font-medium text-gray-700">{r.supplier_name || "—"}</td>
+                    )}
+                    {visibleColumns.vehicle_number && (
+                      <td className="table-td text-xs font-medium text-gray-700 font-mono">{r.vehicle_number}</td>
+                    )}
+                    {visibleColumns.item_count && (
+                      <td className="table-td text-xs font-medium text-gray-700 text-center">{r.item_count}</td>
+                    )}
+                    {visibleColumns.status && (
+                      <td className="table-td text-xs font-medium">
+                        <span className={cn("badge", STATUS_STYLE[r.status])}>{r.status}</span>
+                      </td>
+                    )}
+                    <td className="table-td text-xs font-medium">
+                      <Link href={`/gate-pass/${r.id}`}
+                        className="inline-flex items-center gap-1 text-brand-600 hover:text-brand-700">
+                        <Eye className="h-3.5 w-3.5" /> View
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
     </div>
   );
