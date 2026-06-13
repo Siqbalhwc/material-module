@@ -345,15 +345,15 @@ export default function ProductsPage() {
                   return (
                     <tr key={p.id} className="bg-blue-50">
                       <td className="table-td w-8"></td>
-                      {visibleColumns.code && <td className="table-td font-mono text-xs">{p.code}</td>}
-                      {visibleColumns.name && <td className="table-td"><input className="input text-xs" value={editForm.name} onChange={e => setEditForm(prev => ({ ...prev, name: e.target.value }))} /></td>}
-                      {visibleColumns.category && <td className="table-td"><select className="input text-xs" value={editForm.category} onChange={e => setEditForm(prev => ({ ...prev, category: e.target.value }))}>{CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></td>}
-                      {visibleColumns.uom && <td className="table-td"><select className="input text-xs" value={editForm.uom} onChange={e => setEditForm(prev => ({ ...prev, uom: e.target.value }))}>{UOM_LIST.map(u => <option key={u} value={u}>{u}</option>)}</select></td>}
-                      {visibleColumns.kgPerBag && <td className="table-td"><input className="input text-xs w-20" type="number" step="0.001" value={editForm.conversion_kg} onChange={e => setEditForm(prev => ({ ...prev, conversion_kg: e.target.value }))} /></td>}
-                      {visibleColumns.reorder && <td className="table-td"><input className="input text-xs w-20" type="number" step="0.001" value={editForm.reorder_level} onChange={e => setEditForm(prev => ({ ...prev, reorder_level: e.target.value }))} /></td>}
-                      {visibleColumns.rc && <td className="table-td"><input type="checkbox" checked={editForm.is_rc} onChange={e => setEditForm(prev => ({ ...prev, is_rc: e.target.checked }))} /></td>}
-                      {visibleColumns.status && <td className="table-td"><input type="checkbox" checked={editForm.is_active} onChange={e => setEditForm(prev => ({ ...prev, is_active: e.target.checked }))} /></td>}
-                      {isSuperAdmin && <td className="table-td text-right space-x-1"><button onClick={() => saveEdit(p.id)} disabled={saving} className="text-green-600 hover:text-green-700 text-xs"><Check className="h-4 w-4 inline" /></button><button onClick={cancelEdit} className="text-gray-400 hover:text-gray-600 text-xs"><X className="h-4 w-4 inline" /></button></td>}
+                      {visibleColumns.code && <td className="table-td text-xs font-medium font-mono text-brand-600">{p.code}</td>}
+                      {visibleColumns.name && <td className="table-td text-xs font-medium text-gray-700"><input className="input text-xs" value={editForm.name} onChange={e => setEditForm(prev => ({ ...prev, name: e.target.value }))} /></td>}
+                      {visibleColumns.category && <td className="table-td text-xs font-medium text-gray-700"><select className="input text-xs" value={editForm.category} onChange={e => setEditForm(prev => ({ ...prev, category: e.target.value }))}>{CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></td>}
+                      {visibleColumns.uom && <td className="table-td text-xs font-medium text-gray-700 uppercase"><select className="input text-xs" value={editForm.uom} onChange={e => setEditForm(prev => ({ ...prev, uom: e.target.value }))}>{UOM_LIST.map(u => <option key={u} value={u}>{u}</option>)}</select></td>}
+                      {visibleColumns.kgPerBag && <td className="table-td text-xs font-medium text-gray-700"><input className="input text-xs w-20" type="number" step="0.001" value={editForm.conversion_kg} onChange={e => setEditForm(prev => ({ ...prev, conversion_kg: e.target.value }))} /></td>}
+                      {visibleColumns.reorder && <td className="table-td text-xs font-medium text-gray-700"><input className="input text-xs w-20" type="number" step="0.001" value={editForm.reorder_level} onChange={e => setEditForm(prev => ({ ...prev, reorder_level: e.target.value }))} /></td>}
+                      {visibleColumns.rc && <td className="table-td text-xs font-medium text-gray-700"><input type="checkbox" checked={editForm.is_rc} onChange={e => setEditForm(prev => ({ ...prev, is_rc: e.target.checked }))} /></td>}
+                      {visibleColumns.status && <td className="table-td text-xs font-medium text-gray-700"><input type="checkbox" checked={editForm.is_active} onChange={e => setEditForm(prev => ({ ...prev, is_active: e.target.checked }))} /></td>}
+                      {isSuperAdmin && <td className="table-td text-xs font-medium text-right space-x-1"><button onClick={() => saveEdit(p.id)} disabled={saving} className="text-green-600 hover:text-green-700 text-xs"><Check className="h-4 w-4 inline" /></button><button onClick={cancelEdit} className="text-gray-400 hover:text-gray-600 text-xs"><X className="h-4 w-4 inline" /></button></td>}
                     </tr>
                   );
                 }
@@ -363,15 +363,15 @@ export default function ProductsPage() {
                     <td className="table-td w-8">
                       {isParent && <button onClick={() => toggleExpand(p.id)} className="p-0.5 text-gray-400 hover:text-gray-600">{isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</button>}
                     </td>
-                    {visibleColumns.code && <td className={cn("table-td font-mono text-xs font-medium text-brand-600", isChild && "pl-6")}>{p.code}</td>}
-                    {visibleColumns.name && <td className={cn("table-td font-medium", isChild && "pl-6 text-gray-600")}>{isChild && <span className="text-gray-300 mr-1">└</span>}{p.name}</td>}
-                    {visibleColumns.category && <td className="table-td text-gray-500">{p.category}</td>}
-                    {visibleColumns.uom && <td className="table-td text-xs uppercase text-gray-500">{p.uom}</td>}
-                    {visibleColumns.kgPerBag && <td className="table-td">{p.uom === "bags" && p.conversion_kg ? <span className="inline-flex items-center gap-1 text-xs text-gray-600"><span className="font-medium">{p.conversion_kg}</span> kg</span> : <span className="text-gray-300">—</span>}</td>}
-                    {visibleColumns.reorder && <td className="table-td">{p.reorder_level}</td>}
-                    {visibleColumns.rc && <td className="table-td">{p.is_rc && <span className="inline-flex items-center gap-1 text-xs text-purple-600"><RotateCcw className="h-3 w-3" /> RC</span>}</td>}
-                    {visibleColumns.status && <td className="table-td"><span className={cn("badge", p.is_active ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-100 text-gray-400")}>{p.is_active ? "Active" : "Inactive"}</span></td>}
-                    {isSuperAdmin && <td className="table-td text-right space-x-2"><button onClick={() => startEdit(p)} className="text-blue-600 hover:text-blue-700 text-xs"><Pencil className="h-3.5 w-3.5" /></button><button onClick={() => handleDelete(p.id, p.name)} className="text-red-600 hover:text-red-700 text-xs"><Trash2 className="h-3.5 w-3.5" /></button></td>}
+                    {visibleColumns.code && <td className={cn("table-td text-xs font-medium font-mono text-brand-600", isChild && "pl-6")}>{p.code}</td>}
+                    {visibleColumns.name && <td className={cn("table-td text-xs font-medium text-gray-700", isChild && "pl-6")}>{isChild && <span className="text-gray-300 mr-1">└</span>}{p.name}</td>}
+                    {visibleColumns.category && <td className="table-td text-xs font-medium text-gray-700">{p.category}</td>}
+                    {visibleColumns.uom && <td className="table-td text-xs font-medium text-gray-700 uppercase">{p.uom}</td>}
+                    {visibleColumns.kgPerBag && <td className="table-td text-xs font-medium text-gray-700">{p.uom === "bags" && p.conversion_kg ? <span className="inline-flex items-center gap-1"><span className="font-medium">{p.conversion_kg}</span> kg</span> : <span className="text-gray-300">—</span>}</td>}
+                    {visibleColumns.reorder && <td className="table-td text-xs font-medium text-gray-700">{p.reorder_level}</td>}
+                    {visibleColumns.rc && <td className="table-td text-xs font-medium text-gray-700">{p.is_rc && <span className="inline-flex items-center gap-1 text-xs text-purple-600"><RotateCcw className="h-3 w-3" /> RC</span>}</td>}
+                    {visibleColumns.status && <td className="table-td text-xs font-medium text-gray-700"><span className={cn("badge", p.is_active ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-100 text-gray-400")}>{p.is_active ? "Active" : "Inactive"}</span></td>}
+                    {isSuperAdmin && <td className="table-td text-xs font-medium text-right space-x-2"><button onClick={() => startEdit(p)} className="text-blue-600 hover:text-blue-700"><Pencil className="h-3.5 w-3.5" /></button><button onClick={() => handleDelete(p.id, p.name)} className="text-red-600 hover:text-red-700"><Trash2 className="h-3.5 w-3.5" /></button></td>}
                   </tr>
                 );
               })}
