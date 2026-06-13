@@ -346,7 +346,7 @@ export default function MaterialStorePage() {
     if (!issueItem) return;
     const qtyKg = parseFloat(issueQtyKg);
     if (isNaN(qtyKg) || qtyKg <= 0 || qtyKg > issueItem.closing_kg) {
-      alert(`Invalid quantity (max ${issueItem.closing_kg.toFixed(3)} kg)`);
+      alert(`Invalid quantity (max ${issueItem.closing_kg.toFixed(2)} kg)`);
       return;
     }
     setIssuing(true);
@@ -373,7 +373,7 @@ export default function MaterialStorePage() {
     setIssueQtyBags(bagsStr);
     const bags = parseFloat(bagsStr);
     if (issueItem && issueItem.conversion_kg && !isNaN(bags)) {
-      setIssueQtyKg((bags * issueItem.conversion_kg).toFixed(3));
+      setIssueQtyKg((bags * issueItem.conversion_kg).toFixed(2));
     } else { setIssueQtyKg(""); }
   };
 
@@ -381,7 +381,7 @@ export default function MaterialStorePage() {
     setIssueQtyKg(kgStr);
     const kg = parseFloat(kgStr);
     if (issueItem && issueItem.conversion_kg && !isNaN(kg)) {
-      setIssueQtyBags((kg / issueItem.conversion_kg).toFixed(3));
+      setIssueQtyBags((kg / issueItem.conversion_kg).toFixed(2));
     } else { setIssueQtyBags(""); }
   };
 
@@ -393,7 +393,7 @@ export default function MaterialStorePage() {
     const isExpanded = expandedParents.has(item.product_id);
     const lowStock = item.closing_kg <= item.reorder_level && item.reorder_level > 0;
     const hasBags = item.uom === "bags" && item.conversion_kg != null;
-    const toBags = (kg: number) => (kg / item.conversion_kg!).toFixed(3);
+    const toBags = (kg: number) => (kg / item.conversion_kg!).toFixed(2);
 
     if (isChild && item.parent_product_id && !expandedParents.has(item.parent_product_id)) {
       return null;
@@ -416,7 +416,7 @@ export default function MaterialStorePage() {
           )}
         </td>
         {visibleColumns.code && (
-          <td className={cn("table-td text-xs font-medium font-mono text-brand-600", isChild && "pl-6")}>{item.code}</td>
+          <td className={cn("table-td text-xs font-medium font-mono text-brand-600 min-w-[100px]", isChild && "pl-6")}>{item.code}</td>
         )}
         {visibleColumns.name && (
           <td className={cn("table-td text-xs font-medium text-gray-700", isChild && "pl-6")}>
@@ -426,14 +426,14 @@ export default function MaterialStorePage() {
             {isParent && <span className="ml-1.5 text-[10px] text-gray-400 font-normal">({item.children!.length} variants)</span>}
           </td>
         )}
-        {visibleColumns.category && <td className="table-td text-xs font-medium text-gray-700">{item.category}</td>}
+        {visibleColumns.category && <td className="table-td text-xs font-medium text-gray-700 whitespace-nowrap">{item.category}</td>}
         {visibleColumns.uom && <td className="table-td text-xs font-medium text-gray-700 uppercase">{item.uom}</td>}
         {visibleColumns.reorder_level && <td className="table-td text-xs font-medium text-gray-700 text-right">{item.reorder_level}</td>}
-        {visibleColumns.opening_kg && <td className="table-td text-xs font-medium text-gray-700 text-right">{item.opening_kg.toFixed(3)}</td>}
-        {visibleColumns.received_supplier_kg && <td className="table-td text-xs font-medium text-gray-700 text-right">{item.received_supplier_kg.toFixed(3)}</td>}
-        {visibleColumns.received_rc_kg && <td className="table-td text-xs font-medium text-gray-700 text-right">{item.received_rc_kg.toFixed(3)}</td>}
-        {visibleColumns.issued_wip_kg && <td className="table-td text-xs font-medium text-gray-700 text-right">{item.issued_wip_kg.toFixed(3)}</td>}
-        {visibleColumns.closing_kg && <td className={cn("table-td text-xs font-medium text-gray-700 text-right", isParent ? "font-semibold" : "")}>{item.closing_kg.toFixed(3)}</td>}
+        {visibleColumns.opening_kg && <td className="table-td text-xs font-medium text-gray-700 text-right">{item.opening_kg.toFixed(2)}</td>}
+        {visibleColumns.received_supplier_kg && <td className="table-td text-xs font-medium text-gray-700 text-right">{item.received_supplier_kg.toFixed(2)}</td>}
+        {visibleColumns.received_rc_kg && <td className="table-td text-xs font-medium text-gray-700 text-right">{item.received_rc_kg.toFixed(2)}</td>}
+        {visibleColumns.issued_wip_kg && <td className="table-td text-xs font-medium text-gray-700 text-right">{item.issued_wip_kg.toFixed(2)}</td>}
+        {visibleColumns.closing_kg && <td className={cn("table-td text-xs font-medium text-gray-700 text-right", isParent ? "font-semibold" : "")}>{item.closing_kg.toFixed(2)}</td>}
         {visibleColumns.closing_bags && <td className="table-td text-xs font-medium text-gray-700 text-right">{hasBags ? toBags(item.closing_kg) : "—"}</td>}
         <td className="table-td text-xs font-medium text-right print:hidden">
           {!isParent && (
@@ -480,7 +480,7 @@ export default function MaterialStorePage() {
                   {Object.entries(visibleColumns).map(([key, value]) => (
                     <label key={key} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded">
                       <input type="checkbox" checked={value} onChange={() => toggleColumn(key as keyof typeof visibleColumns)} className="rounded border-gray-300" />
-                      <span className="capitalize text-gray-600">{key === "reorder_level" ? "Reorder Lvl" : key.replace(/_kg$/, " (KG)").replace(/_bags$/, " (Bags)").replace(/_/g, " ")}</span>
+                      <span className="capitalize text-gray-600">{key === "reorder_level" ? "Reorder Lvl" : key.replace(/_kg$/, "").replace(/_bags$/, " (Bags)").replace(/_/g, " ")}</span>
                     </label>
                   ))}
                 </div>
@@ -496,6 +496,11 @@ export default function MaterialStorePage() {
         <input type="text" placeholder="Search..." className="input pl-9" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
       </div>
 
+      {/* Table subtitle */}
+      <div className="flex items-center justify-end mb-2 print:hidden">
+        <span className="text-[10px] text-gray-400 font-medium">All quantities in KG</span>
+      </div>
+
       <div className="card overflow-hidden">
         {loading ? (
           <div className="py-16 text-center text-gray-400">Loading…</div>
@@ -505,19 +510,19 @@ export default function MaterialStorePage() {
           <table className="w-full text-xs">
             <thead className="bg-gray-50 border-b border-gray-100">
               <tr>
-                <th className="table-th w-8 print:hidden"></th>
-                {visibleColumns.code && <th className="table-th cursor-pointer" onClick={() => handleSort("code")}>Code {renderSortIcon("code")}</th>}
-                {visibleColumns.name && <th className="table-th cursor-pointer" onClick={() => handleSort("name")}>Name {renderSortIcon("name")}</th>}
-                {visibleColumns.category && <th className="table-th cursor-pointer" onClick={() => handleSort("category")}>Category {renderSortIcon("category")}</th>}
-                {visibleColumns.uom && <th className="table-th cursor-pointer" onClick={() => handleSort("uom")}>UOM {renderSortIcon("uom")}</th>}
-                {visibleColumns.reorder_level && <th className="table-th cursor-pointer text-right" onClick={() => handleSort("reorder_level")}>Reorder {renderSortIcon("reorder_level")}</th>}
-                {visibleColumns.opening_kg && <th className="table-th cursor-pointer text-right" onClick={() => handleSort("opening_kg")}>Opening (KG) {renderSortIcon("opening_kg")}</th>}
-                {visibleColumns.received_supplier_kg && <th className="table-th cursor-pointer text-right" onClick={() => handleSort("received_supplier_kg")}>Recv Supplier (KG) {renderSortIcon("received_supplier_kg")}</th>}
-                {visibleColumns.received_rc_kg && <th className="table-th cursor-pointer text-right" onClick={() => handleSort("received_rc_kg")}>Recv RC (KG) {renderSortIcon("received_rc_kg")}</th>}
-                {visibleColumns.issued_wip_kg && <th className="table-th cursor-pointer text-right" onClick={() => handleSort("issued_wip_kg")}>Issued WIP (KG) {renderSortIcon("issued_wip_kg")}</th>}
-                {visibleColumns.closing_kg && <th className="table-th cursor-pointer text-right" onClick={() => handleSort("closing_kg")}>Closing (KG) {renderSortIcon("closing_kg")}</th>}
-                {visibleColumns.closing_bags && <th className="table-th text-right">Closing (Bags)</th>}
-                <th className="table-th print:hidden"></th>
+                <th className="table-th w-8 print:hidden whitespace-nowrap"></th>
+                {visibleColumns.code && <th className="table-th cursor-pointer whitespace-nowrap min-w-[100px]" onClick={() => handleSort("code")}>Code {renderSortIcon("code")}</th>}
+                {visibleColumns.name && <th className="table-th cursor-pointer whitespace-nowrap" onClick={() => handleSort("name")}>Name {renderSortIcon("name")}</th>}
+                {visibleColumns.category && <th className="table-th cursor-pointer whitespace-nowrap" onClick={() => handleSort("category")}>Category {renderSortIcon("category")}</th>}
+                {visibleColumns.uom && <th className="table-th cursor-pointer whitespace-nowrap" onClick={() => handleSort("uom")}>UOM {renderSortIcon("uom")}</th>}
+                {visibleColumns.reorder_level && <th className="table-th cursor-pointer text-right whitespace-nowrap" onClick={() => handleSort("reorder_level")}>Reorder {renderSortIcon("reorder_level")}</th>}
+                {visibleColumns.opening_kg && <th className="table-th cursor-pointer text-right whitespace-nowrap" onClick={() => handleSort("opening_kg")}>Opening {renderSortIcon("opening_kg")}</th>}
+                {visibleColumns.received_supplier_kg && <th className="table-th cursor-pointer text-right whitespace-nowrap" onClick={() => handleSort("received_supplier_kg")}>Recv Supplier {renderSortIcon("received_supplier_kg")}</th>}
+                {visibleColumns.received_rc_kg && <th className="table-th cursor-pointer text-right whitespace-nowrap" onClick={() => handleSort("received_rc_kg")}>Recv RC {renderSortIcon("received_rc_kg")}</th>}
+                {visibleColumns.issued_wip_kg && <th className="table-th cursor-pointer text-right whitespace-nowrap" onClick={() => handleSort("issued_wip_kg")}>Issued WIP {renderSortIcon("issued_wip_kg")}</th>}
+                {visibleColumns.closing_kg && <th className="table-th cursor-pointer text-right whitespace-nowrap" onClick={() => handleSort("closing_kg")}>Closing {renderSortIcon("closing_kg")}</th>}
+                {visibleColumns.closing_bags && <th className="table-th text-right whitespace-nowrap">Closing (Bags)</th>}
+                <th className="table-th print:hidden whitespace-nowrap"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
@@ -560,7 +565,7 @@ export default function MaterialStorePage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 print:hidden">
           <div className="bg-white rounded-xl p-6 w-96 space-y-4">
             <h2 className="text-lg font-semibold">Issue to WIP: {issueItem.name}</h2>
-            <p className="text-sm text-gray-500">Available (closing): {issueItem.closing_kg.toFixed(3)} kg</p>
+            <p className="text-sm text-gray-500">Available (closing): {issueItem.closing_kg.toFixed(2)} kg</p>
             <div>
               <label className="label">Quantity (KG)</label>
               <input type="number" step="0.001" min="0" max={issueItem.closing_kg} className="input" value={issueQtyKg} onChange={e => updateIssueKg(e.target.value)} />
