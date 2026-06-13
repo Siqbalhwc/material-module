@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
-import Header from "@/components/layout/Header";
+import PageHeader from "@/components/layout/PageHeader";
 import {
   Search, ArrowUpDown, ArrowUp, ArrowDown, Package,
   Send, Printer, X, Settings2,
@@ -144,7 +144,7 @@ export default function RCStorePage() {
     }
 
     const displayList: RCStockMovement[] = [];
-    for (const [, parent] of Array.from(parentMap.entries())) {
+    for (const parent of Array.from(parentMap.values())) {
       displayList.push(parent);
       if (parent.children && parent.children.length > 0) displayList.push(...parent.children);
     }
@@ -212,8 +212,8 @@ export default function RCStorePage() {
     fetchIncoming(); fetchMovements();
   };
 
-  const updateBags = (v: string) => { setIssueQtyBags(v); const b = parseFloat(v); if (issueItem?.conversion_kg && !isNaN(b)) setIssueQtyKg((b * issueItem.conversion_kg).toFixed(3)); else setIssueQtyKg(""); };
-  const updateKg = (v: string) => { setIssueQtyKg(v); const k = parseFloat(v); if (issueItem?.conversion_kg && !isNaN(k)) setIssueQtyBags((k / issueItem.conversion_kg).toFixed(3)); else setIssueQtyBags(""); };
+  const updateBags = (v: string) => { setIssueQtyBags(v); const b = parseFloat(v); if (issueItem?.conversion_kg && !isNaN(b)) setIssueQtyKg((b * issueItem.conversion_kg).toFixed(2)); else setIssueQtyKg(""); };
+  const updateKg = (v: string) => { setIssueQtyKg(v); const k = parseFloat(v); if (issueItem?.conversion_kg && !isNaN(k)) setIssueQtyBags((k / issueItem.conversion_kg).toFixed(2)); else setIssueQtyBags(""); };
 
   const handleIssueToMS = async () => {
     if (!issueItem) return;
@@ -234,64 +234,108 @@ export default function RCStorePage() {
 
     return (
       <tr key={item.product_id} className={cn("hover:bg-gray-50", isChild && "bg-gray-50/50")}>
-        <td className="table-td w-8 print:hidden">
+        <td className="table-td w-8 print:hidden text-xs font-medium text-gray-700">
           {isParent && <button onClick={() => toggleExpand(item.product_id)}>{isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</button>}
         </td>
-        {visibleColumns.code && <td className={cn("table-td font-mono text-xs", isChild && "pl-6")}>{item.code}</td>}
-        {visibleColumns.name && <td className={cn("table-td font-medium", isChild && "pl-6")}>{isChild && "└ "}{item.name}{isParent && <span className="ml-1 text-[10px] text-gray-400">({item.children!.length} variants)</span>}</td>}
-        {visibleColumns.category && <td className="table-td">{item.category}</td>}
-        {visibleColumns.uom && <td className="table-td uppercase text-xs">{item.uom}</td>}
-        {visibleColumns.opening_kg && <td className="table-td text-right">{item.opening_kg.toFixed(3)}</td>}
-        {visibleColumns.received_kg && <td className="table-td text-right">{item.received_kg.toFixed(3)}</td>}
-        {visibleColumns.issued_kg && <td className="table-td text-right">{item.issued_kg.toFixed(3)}</td>}
-        {visibleColumns.closing_kg && <td className="table-td text-right font-medium">{item.closing_kg.toFixed(3)}</td>}
-        <td className="table-td print:hidden">{!isParent && <button className="text-xs text-brand-600" onClick={() => { setIssueItem(item); setIssueQtyKg(""); setIssueQtyBags(""); }}><Send className="h-3 w-3 inline" /> Issue to MS</button>}</td>
+        {visibleColumns.code && <td className={cn("table-td text-xs font-medium font-mono text-brand-600 min-w-[100px]", isChild && "pl-6")}>{item.code}</td>}
+        {visibleColumns.name && <td className={cn("table-td text-xs font-medium text-gray-700", isChild && "pl-6")}>{isChild && "└ "}{item.name}{isParent && <span className="ml-1 text-[10px] text-gray-400">({item.children!.length} variants)</span>}</td>}
+        {visibleColumns.category && <td className="table-td text-xs font-medium text-gray-700 whitespace-nowrap">{item.category}</td>}
+        {visibleColumns.uom && <td className="table-td text-xs font-medium text-gray-700 uppercase">{item.uom}</td>}
+        {visibleColumns.opening_kg && <td className="table-td text-xs font-medium text-gray-700 text-right">{item.opening_kg.toFixed(2)}</td>}
+        {visibleColumns.received_kg && <td className="table-td text-xs font-medium text-gray-700 text-right">{item.received_kg.toFixed(2)}</td>}
+        {visibleColumns.issued_kg && <td className="table-td text-xs font-medium text-gray-700 text-right">{item.issued_kg.toFixed(2)}</td>}
+        {visibleColumns.closing_kg && <td className="table-td text-xs font-medium text-gray-700 text-right font-semibold">{item.closing_kg.toFixed(2)}</td>}
+        <td className="table-td text-xs font-medium text-right print:hidden">
+          {!isParent && (
+            <button className="text-brand-600 hover:text-brand-700" onClick={() => { setIssueItem(item); setIssueQtyKg(""); setIssueQtyBags(""); }}>
+              <Send className="h-3 w-3 inline" /> Issue to MS
+            </button>
+          )}
+        </td>
       </tr>
     );
   };
 
   return (
-    <>
-      <Header title="RC Store" subtitle="Date‑range report"
-        actions={<button className="relative btn-secondary flex items-center gap-2" onClick={() => setShowIncoming(true)}><Package className="h-4 w-4" />{incoming.length > 0 && <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center">{incoming.length}</span>} Incoming</button>}
+    <div className="p-6">
+      <PageHeader
+        title="RC Store – Returnable Components"
+        subtitle="Date‑range report"
+        actions={
+          <button className="relative btn-secondary flex items-center gap-2" onClick={() => setShowIncoming(true)}>
+            <Package className="h-4 w-4" />
+            {incoming.length > 0 && (
+              <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center">
+                {incoming.length}
+              </span>
+            )}
+            Incoming
+          </button>
+        }
       />
-      <main className="flex-1 p-6 space-y-6">
-        <div className="flex items-center justify-between print:hidden">
-          <div className="flex items-center gap-3"><label>From:</label><input type="date" className="input" value={startDate} onChange={e => setStartDate(e.target.value)} /><label>To:</label><input type="date" className="input" value={endDate} onChange={e => setEndDate(e.target.value)} /></div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setShowColumnMenu(!showColumnMenu)} className="btn-secondary text-xs"><Settings2 className="h-3.5 w-3.5" /> Columns</button>
-            <button onClick={() => window.print()} className="btn-secondary text-xs"><Printer className="h-3.5 w-3.5" /> Print</button>
-          </div>
+
+      <div className="flex items-center justify-between mb-4 print:hidden">
+        <div className="flex items-center gap-3">
+          <label className="text-sm font-medium">From:</label><input type="date" className="input" value={startDate} onChange={e => setStartDate(e.target.value)} />
+          <label className="text-sm font-medium">To:</label><input type="date" className="input" value={endDate} onChange={e => setEndDate(e.target.value)} />
         </div>
-
-        <section>
-          <div className="relative max-w-sm mb-3"><Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><input type="text" placeholder="Search..." className="input pl-9" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} /></div>
-          <div className="card overflow-hidden">
-            {loading ? <div className="py-16 text-center text-gray-400">Loading…</div> : filtered.length === 0 ? <div className="py-16 text-center text-gray-400">No data.</div> :
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50"><tr>
-                  <th className="w-8"></th>
-                  {visibleColumns.code && <th className="table-th cursor-pointer" onClick={() => handleSort("code")}>Code {sortIcon("code")}</th>}
-                  {visibleColumns.name && <th className="table-th cursor-pointer" onClick={() => handleSort("name")}>Name {sortIcon("name")}</th>}
-                  {visibleColumns.category && <th className="table-th cursor-pointer" onClick={() => handleSort("category")}>Category {sortIcon("category")}</th>}
-                  {visibleColumns.uom && <th className="table-th cursor-pointer" onClick={() => handleSort("uom")}>UOM {sortIcon("uom")}</th>}
-                  {visibleColumns.opening_kg && <th className="table-th text-right">Opening (KG)</th>}
-                  {visibleColumns.received_kg && <th className="table-th text-right">Received (KG)</th>}
-                  {visibleColumns.issued_kg && <th className="table-th text-right">Issued (KG)</th>}
-                  {visibleColumns.closing_kg && <th className="table-th text-right">Closing (KG)</th>}
-                  <th></th>
-                </tr></thead>
-                <tbody className="divide-y">{filtered.map(item => renderRow(item))}</tbody>
-              </table>}
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <button className="btn-secondary text-xs flex items-center gap-1" onClick={() => setShowColumnMenu(!showColumnMenu)}><Settings2 className="h-3.5 w-3.5" /> Columns</button>
+            {showColumnMenu && (
+              <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-md shadow-lg z-20 text-xs">
+                <div className="p-2 space-y-1">
+                  {Object.entries(visibleColumns).map(([k, v]) => (
+                    <label key={k} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded">
+                      <input type="checkbox" checked={v} onChange={() => toggleCol(k as keyof typeof visibleColumns)} className="rounded border-gray-300" />
+                      <span className="capitalize text-gray-600">{k.replace(/_/g, " ")}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
-        </section>
+          <button onClick={() => window.print()} className="btn-secondary text-xs flex items-center gap-1"><Printer className="h-3.5 w-3.5" /> Print</button>
+        </div>
+      </div>
 
-        {/* Incoming modal */}
-        {showIncoming && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"><div className="bg-white rounded-xl p-6 w-full max-w-2xl"><div className="flex justify-between"><h2 className="text-lg font-semibold">Incoming</h2><button onClick={() => setShowIncoming(false)}><X className="h-5 w-5" /></button></div>{incoming.length === 0 ? <p>No pending transfers.</p> : <table className="w-full text-sm"><thead><tr><th>From</th><th>Product</th><th>Qty</th><th>UOM</th><th></th></tr></thead><tbody>{incoming.map(t => <tr key={t.id}><td>{t.from_store}</td><td>{t.product_name}</td><td>{t.quantity}</td><td>{t.uom}</td><td className="space-x-1"><button onClick={() => handleIncomingAction(t.id, "accepted")} className="text-green-600 text-xs">Accept</button><button onClick={() => handleIncomingAction(t.id, "rejected")} className="text-red-600 text-xs">Reject</button></td></tr>)}</tbody></table>}</div></div>}
+      <div className="relative max-w-sm mb-4">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+        <input type="text" placeholder="Search..." className="input pl-9" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+      </div>
 
-        {/* Issue modal */}
-        {issueItem && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"><div className="bg-white rounded-xl p-6 w-96"><h2 className="text-lg font-semibold">Issue to MS: {issueItem.name}</h2><p className="text-sm">Available: {issueItem.closing_kg.toFixed(3)} kg</p><input type="number" step="0.001" max={issueItem.closing_kg} className="input" value={issueQtyKg} onChange={e => updateKg(e.target.value)} />{issueItem.uom === "bags" && issueItem.conversion_kg && <input type="number" step="0.001" className="input" value={issueQtyBags} onChange={e => updateBags(e.target.value)} placeholder="Bags" />}<div className="flex justify-end gap-2 mt-4"><button className="btn-secondary" onClick={() => setIssueItem(null)}>Cancel</button><button className="btn-primary" disabled={issuing} onClick={handleIssueToMS}>Send</button></div></div></div>}
-      </main>
-    </>
+      <div className="flex items-center justify-end mb-2 print:hidden">
+        <span className="text-[10px] text-gray-400 font-medium">All quantities in KG</span>
+      </div>
+
+      <div className="card overflow-hidden">
+        {loading ? <div className="py-16 text-center text-gray-400">Loading…</div> : filtered.length === 0 ? <div className="py-16 text-center text-gray-400">No data.</div> :
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 border-b border-gray-100">
+              <tr>
+                <th className="table-th w-8 print:hidden whitespace-nowrap"></th>
+                {visibleColumns.code && <th className="table-th cursor-pointer whitespace-nowrap min-w-[100px]" onClick={() => handleSort("code")}>Code {sortIcon("code")}</th>}
+                {visibleColumns.name && <th className="table-th cursor-pointer whitespace-nowrap" onClick={() => handleSort("name")}>Name {sortIcon("name")}</th>}
+                {visibleColumns.category && <th className="table-th cursor-pointer whitespace-nowrap" onClick={() => handleSort("category")}>Category {sortIcon("category")}</th>}
+                {visibleColumns.uom && <th className="table-th cursor-pointer whitespace-nowrap" onClick={() => handleSort("uom")}>UOM {sortIcon("uom")}</th>}
+                {visibleColumns.opening_kg && <th className="table-th cursor-pointer text-right whitespace-nowrap" onClick={() => handleSort("opening_kg")}>Opening {sortIcon("opening_kg")}</th>}
+                {visibleColumns.received_kg && <th className="table-th cursor-pointer text-right whitespace-nowrap" onClick={() => handleSort("received_kg")}>Received {sortIcon("received_kg")}</th>}
+                {visibleColumns.issued_kg && <th className="table-th cursor-pointer text-right whitespace-nowrap" onClick={() => handleSort("issued_kg")}>Issued {sortIcon("issued_kg")}</th>}
+                {visibleColumns.closing_kg && <th className="table-th cursor-pointer text-right whitespace-nowrap" onClick={() => handleSort("closing_kg")}>Closing {sortIcon("closing_kg")}</th>}
+                <th className="table-th print:hidden whitespace-nowrap"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {filtered.map(item => renderRow(item))}
+            </tbody>
+          </table>}
+      </div>
+
+      {/* Incoming modal */}
+      {showIncoming && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"><div className="bg-white rounded-xl p-6 w-full max-w-2xl"><div className="flex justify-between"><h2 className="text-lg font-semibold">Incoming</h2><button onClick={() => setShowIncoming(false)}><X className="h-5 w-5" /></button></div>{incoming.length === 0 ? <p>No pending transfers.</p> : <table className="w-full text-sm"><thead><tr><th>From</th><th>Product</th><th>Qty</th><th>UOM</th><th></th></tr></thead><tbody>{incoming.map(t => <tr key={t.id}><td>{t.from_store}</td><td>{t.product_name}</td><td>{t.quantity}</td><td>{t.uom}</td><td className="space-x-1"><button onClick={() => handleIncomingAction(t.id, "accepted")} className="text-green-600 text-xs">Accept</button><button onClick={() => handleIncomingAction(t.id, "rejected")} className="text-red-600 text-xs">Reject</button></td></tr>)}</tbody></table>}</div></div>}
+
+      {/* Issue modal */}
+      {issueItem && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"><div className="bg-white rounded-xl p-6 w-96"><h2 className="text-lg font-semibold">Issue to MS: {issueItem.name}</h2><p className="text-sm">Available: {issueItem.closing_kg.toFixed(2)} kg</p><input type="number" step="0.001" max={issueItem.closing_kg} className="input" value={issueQtyKg} onChange={e => updateKg(e.target.value)} />{issueItem.uom === "bags" && issueItem.conversion_kg && <input type="number" step="0.001" className="input" value={issueQtyBags} onChange={e => updateBags(e.target.value)} placeholder="Bags" />}<div className="flex justify-end gap-2 mt-4"><button className="btn-secondary" onClick={() => setIssueItem(null)}>Cancel</button><button className="btn-primary" disabled={issuing} onClick={handleIssueToMS}>Send</button></div></div></div>}
+    </div>
   );
 }
