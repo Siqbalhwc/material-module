@@ -12,7 +12,7 @@ import { createBrowserClient } from "@supabase/ssr";
 import { useState, useEffect } from "react";
 
 const NAV = [
-  { label: "Dashboard",        href: "/dashboard",                icon: LayoutDashboard, roles: ["*"] },
+  { label: "Dashboard",        href: "/dashboard",                icon: LayoutDashboard, roles: ["super_admin","admin"] },
   { label: "Gate Pass",        href: "/gate-pass",                icon: Truck,           roles: ["super_admin","admin","store_keeper","gate_pass_operator"] },
   { label: "Outward Gate Pass",href: "/outward-gate-pass",        icon: Send,            roles: ["super_admin","admin","gate_pass_operator"] },
   { label: "Material Store",   href: "/material-store",           icon: Warehouse,       roles: ["super_admin","admin","store_keeper"] },
