@@ -248,8 +248,9 @@ export default function MaterialStorePage() {
   const updateBags = (v: string) => { setIssueQtyBags(v); const b = parseFloat(v); if (issueItem?.conversion_kg && !isNaN(b)) setIssueQtyKg((b * issueItem.conversion_kg).toFixed(2)); else setIssueQtyKg(""); };
   const updateKg = (v: string) => { setIssueQtyKg(v); const k = parseFloat(v); if (issueItem?.conversion_kg && !isNaN(k)) setIssueQtyBags((k / issueItem.conversion_kg).toFixed(2)); else setIssueQtyBags(""); };
 
-  const handleExportExcel = () => {
-    const data = filtered.map(item => ({
+  const handleExportExcel = async () => {
+    // 1. Summary sheet
+    const summaryData = filtered.map(item => ({
       Code: item.code,
       Name: item.name,
       Category: item.category,
@@ -260,9 +261,38 @@ export default function MaterialStorePage() {
       "Issued WIP (KG)": item.issued_wip_kg,
       "Closing (KG)": item.closing_kg,
     }));
-    const ws = XLSX.utils.json_to_sheet(data);
+
+    // 2. Fetch all transactions for the selected period
+    const endInclusive = new Date(endDate);
+    endInclusive.setDate(endInclusive.getDate() + 1);
+    const end = endInclusive.toISOString().slice(0, 10);
+
+    const { data: transactions } = await supabase
+      .from("stock_ledger")
+      .select("created_at, txn_type, quantity, direction, reference_type, reference_id, notes, products(name, code)")
+      .eq("store", "material_store")
+      .gte("created_at", startDate)
+      .lt("created_at", end)
+      .order("created_at", { ascending: true });
+
+    const transactionData = (transactions || []).map((t: any) => ({
+      Date: new Date(t.created_at).toLocaleDateString("en-GB"),
+      Type: t.txn_type,
+      Product: t.products?.name || "Unknown",
+      Code: t.products?.code || "",
+      Direction: t.direction === 1 ? "In" : "Out",
+      Quantity: t.quantity,
+      Reference: t.reference_type || "",
+      "Ref ID": t.reference_id ? t.reference_id.slice(0, 8) : "",
+      Notes: t.notes || "",
+    }));
+
+    // Create Excel workbook with both sheets
+    const ws1 = XLSX.utils.json_to_sheet(summaryData);
+    const ws2 = XLSX.utils.json_to_sheet(transactionData);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Material Store");
+    XLSX.utils.book_append_sheet(wb, ws1, "Summary");
+    XLSX.utils.book_append_sheet(wb, ws2, "Transactions");
     XLSX.writeFile(wb, `material_store_${startDate}_to_${endDate}.xlsx`);
   };
 
