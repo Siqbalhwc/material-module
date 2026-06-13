@@ -4,11 +4,12 @@ import PageHeader from "@/components/layout/PageHeader";
 import {
   Search, ArrowUpDown, ArrowUp, ArrowDown, Package,
   AlertTriangle, Send, Bell, X, Printer, Settings2,
-  ChevronDown, ChevronRight
+  ChevronDown, ChevronRight, Download
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { StoreType } from "@/types";
+import * as XLSX from 'xlsx';
 
 type MaterialStockMovement = {
   product_id: string;
@@ -247,6 +248,24 @@ export default function MaterialStorePage() {
   const updateBags = (v: string) => { setIssueQtyBags(v); const b = parseFloat(v); if (issueItem?.conversion_kg && !isNaN(b)) setIssueQtyKg((b * issueItem.conversion_kg).toFixed(2)); else setIssueQtyKg(""); };
   const updateKg = (v: string) => { setIssueQtyKg(v); const k = parseFloat(v); if (issueItem?.conversion_kg && !isNaN(k)) setIssueQtyBags((k / issueItem.conversion_kg).toFixed(2)); else setIssueQtyBags(""); };
 
+  const handleExportExcel = () => {
+    const data = filtered.map(item => ({
+      Code: item.code,
+      Name: item.name,
+      Category: item.category,
+      UOM: item.uom,
+      "Opening (KG)": item.opening_kg,
+      "Recv Supplier (KG)": item.received_supplier_kg,
+      "Recv RC (KG)": item.received_rc_kg,
+      "Issued WIP (KG)": item.issued_wip_kg,
+      "Closing (KG)": item.closing_kg,
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Material Store");
+    XLSX.writeFile(wb, `material_store_${startDate}_to_${endDate}.xlsx`);
+  };
+
   const renderRow = (item: MaterialStockMovement) => {
     const isParent = !item.isChild && item.children && item.children.length > 0;
     const isChild = !!item.isChild;
@@ -301,6 +320,7 @@ export default function MaterialStorePage() {
           <div className="flex items-center gap-2">
             <button className="btn-secondary text-xs flex items-center gap-1" onClick={() => setShowColumnMenu(!showColumnMenu)}><Settings2 className="h-3.5 w-3.5" /> Columns</button>
             <button onClick={() => window.print()} className="btn-secondary text-xs flex items-center gap-1"><Printer className="h-3.5 w-3.5" /> Print</button>
+            <button onClick={handleExportExcel} className="btn-secondary text-xs flex items-center gap-1"><Download className="h-3.5 w-3.5" /> Excel</button>
           </div>
         </div>
         <div className="relative max-w-sm mb-4"><Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><input type="text" placeholder="Search..." className="input pl-9" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} /></div>
