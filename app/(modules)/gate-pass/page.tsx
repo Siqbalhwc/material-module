@@ -55,7 +55,6 @@ export default function GatePassPage() {
   });
   const [showColumnMenu, setShowColumnMenu] = useState(false);
 
-  // Company settings for print header
   const [companyName, setCompanyName] = useState("MaterialFlow");
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
 
@@ -178,15 +177,15 @@ export default function GatePassPage() {
           body * { visibility: hidden; }
           .print-area, .print-area * { visibility: visible; }
           .print-area { position: absolute; left: 0; top: 0; width: 100%; padding: 20px 30px; }
-          .screen-only { display: none !important; }
+          .no-print { display: none !important; }
         }
         @media screen {
-          .print-only-header { display: none; }
+          .print-area { display: none; }
         }
       `}</style>
 
       {/* Screen view */}
-      <div className="screen-only">
+      <div className="no-print">
         <PageHeader
           title="Inward Gate Pass"
           subtitle="Material received into factory store"
@@ -232,68 +231,7 @@ export default function GatePassPage() {
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
           <input type="text" placeholder="Search..." className="input pl-9" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
         </div>
-      </div>
 
-      {/* Print area */}
-      <div className="print-area">
-        {/* Print header */}
-        <div className="flex items-center justify-between border-b pb-4 mb-6">
-          <div className="flex items-center gap-3">
-            {logoUrl ? (
-              <img src={logoUrl} alt="Logo" className="h-12 w-12 rounded-lg object-contain" />
-            ) : (
-              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-green-400">
-                <Truck className="h-6 w-6 text-white" />
-              </div>
-            )}
-            <div>
-              <h1 className="text-xl font-bold text-gray-900">{companyName}</h1>
-              <p className="text-xs text-gray-500">Inward Gate Pass Register</p>
-            </div>
-          </div>
-          <div className="text-right">
-            <p className="text-sm font-semibold text-gray-900">
-              {startDate} to {endDate}
-            </p>
-            <p className="text-xs text-gray-500">Total Records: {filtered.length}</p>
-          </div>
-        </div>
-
-        {/* Table */}
-        <table className="w-full text-xs border border-gray-200 rounded-lg overflow-hidden mb-6">
-          <thead className="bg-gray-50">
-            <tr>
-              {visibleColumns.igp_number && <th className="px-2 py-2 text-left font-medium text-gray-600 whitespace-nowrap">IGP No.</th>}
-              {visibleColumns.received_date && <th className="px-2 py-2 text-left font-medium text-gray-600 whitespace-nowrap">Date</th>}
-              {visibleColumns.supplier_name && <th className="px-2 py-2 text-left font-medium text-gray-600 whitespace-nowrap">Supplier</th>}
-              {visibleColumns.vehicle_number && <th className="px-2 py-2 text-left font-medium text-gray-600 whitespace-nowrap">Vehicle</th>}
-              {visibleColumns.item_count && <th className="px-2 py-2 text-center font-medium text-gray-600 whitespace-nowrap">Items</th>}
-              {visibleColumns.status && <th className="px-2 py-2 text-left font-medium text-gray-600 whitespace-nowrap">Status</th>}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {filtered.map((r) => (
-              <tr key={r.id}>
-                {visibleColumns.igp_number && <td className="px-2 py-2 text-xs font-medium font-mono text-gray-700">{r.igp_number}</td>}
-                {visibleColumns.received_date && <td className="px-2 py-2 text-xs font-medium text-gray-700">{formatDate(r.received_date)}</td>}
-                {visibleColumns.supplier_name && <td className="px-2 py-2 text-xs font-medium text-gray-700">{r.supplier_name || "—"}</td>}
-                {visibleColumns.vehicle_number && <td className="px-2 py-2 text-xs font-medium text-gray-700 font-mono">{r.vehicle_number}</td>}
-                {visibleColumns.item_count && <td className="px-2 py-2 text-xs font-medium text-gray-700 text-center">{r.item_count}</td>}
-                {visibleColumns.status && <td className="px-2 py-2 text-xs font-medium"><span className={cn("badge", STATUS_STYLE[r.status])}>{r.status}</span></td>}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        {/* Footer */}
-        <div className="text-xs text-gray-500 border-t pt-3">
-          <p>Printed on {new Date().toLocaleString()}</p>
-          <p className="mt-1">This is a computer‑generated document.</p>
-        </div>
-      </div>
-
-      {/* Screen table (repeated for screen view) */}
-      <div className="screen-only">
         <div className="card overflow-hidden">
           {loading ? (
             <div className="flex items-center justify-center py-16 text-gray-400">Loading…</div>
@@ -378,6 +316,64 @@ export default function GatePassPage() {
               </tbody>
             </table>
           )}
+        </div>
+      </div>
+
+      {/* Print area */}
+      <div className="print-area">
+        {/* Print header */}
+        <div className="flex items-center justify-between border-b pb-4 mb-6">
+          <div className="flex items-center gap-3">
+            {logoUrl ? (
+              <img src={logoUrl} alt="Logo" className="h-12 w-12 rounded-lg object-contain" />
+            ) : (
+              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-green-400">
+                <Truck className="h-6 w-6 text-white" />
+              </div>
+            )}
+            <div>
+              <h1 className="text-xl font-bold text-gray-900">{companyName}</h1>
+              <p className="text-xs text-gray-500">Inward Gate Pass Register</p>
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-sm font-semibold text-gray-900">
+              {startDate} to {endDate}
+            </p>
+            <p className="text-xs text-gray-500">Total Records: {filtered.length}</p>
+          </div>
+        </div>
+
+        {/* Table */}
+        <table className="w-full text-xs border border-gray-200 rounded-lg overflow-hidden mb-6">
+          <thead className="bg-gray-50">
+            <tr>
+              {visibleColumns.igp_number && <th className="px-2 py-2 text-left font-medium text-gray-600 whitespace-nowrap">IGP No.</th>}
+              {visibleColumns.received_date && <th className="px-2 py-2 text-left font-medium text-gray-600 whitespace-nowrap">Date</th>}
+              {visibleColumns.supplier_name && <th className="px-2 py-2 text-left font-medium text-gray-600 whitespace-nowrap">Supplier</th>}
+              {visibleColumns.vehicle_number && <th className="px-2 py-2 text-left font-medium text-gray-600 whitespace-nowrap">Vehicle</th>}
+              {visibleColumns.item_count && <th className="px-2 py-2 text-center font-medium text-gray-600 whitespace-nowrap">Items</th>}
+              {visibleColumns.status && <th className="px-2 py-2 text-left font-medium text-gray-600 whitespace-nowrap">Status</th>}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {filtered.map((r) => (
+              <tr key={r.id}>
+                {visibleColumns.igp_number && <td className="px-2 py-2 text-xs font-medium font-mono text-gray-700">{r.igp_number}</td>}
+                {visibleColumns.received_date && <td className="px-2 py-2 text-xs font-medium text-gray-700">{formatDate(r.received_date)}</td>}
+                {visibleColumns.supplier_name && <td className="px-2 py-2 text-xs font-medium text-gray-700">{r.supplier_name || "—"}</td>}
+                {visibleColumns.vehicle_number && <td className="px-2 py-2 text-xs font-medium text-gray-700 font-mono">{r.vehicle_number}</td>}
+                {visibleColumns.item_count && <td className="px-2 py-2 text-xs font-medium text-gray-700 text-center">{r.item_count}</td>}
+                {visibleColumns.status && <td className="px-2 py-2 text-xs font-medium"><span className={cn("badge", STATUS_STYLE[r.status])}>{r.status}</span></td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        {/* Footer */}
+        <div className="text-xs text-gray-500 border-t pt-3">
+          <p>Printed on {new Date().toLocaleString()}</p>
+          <p className="mt-1">This is a computer‑generated document.</p>
         </div>
       </div>
     </div>
