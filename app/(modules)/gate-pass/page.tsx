@@ -1,8 +1,10 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
-import Header from "@/components/layout/Header";
+import PageHeader from "@/components/layout/PageHeader";
 import Link from "next/link";
-import { Plus, Truck, Eye, Search, ArrowUpDown, ArrowUp, ArrowDown, Settings2 } from "lucide-react";
+import {
+  Plus, Truck, Eye, Search, ArrowUpDown, ArrowUp, ArrowDown, Settings2, Printer
+} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { formatDate, cn } from "@/lib/utils";
 
@@ -31,13 +33,18 @@ type SortField = "igp_number" | "received_date" | "supplier_name" | "vehicle_num
 type SortDir = "asc" | "desc";
 
 export default function GatePassPage() {
+  const today = new Date();
+  const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
+  const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().slice(0, 10);
+  const [startDate, setStartDate] = useState(firstDay);
+  const [endDate, setEndDate] = useState(lastDay);
+
   const [records, setRecords] = useState<GatePassWithMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [sortField, setSortField] = useState<SortField>("received_date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
 
-  // Column visibility
   const [visibleColumns, setVisibleColumns] = useState({
     igp_number: true,
     received_date: true,
@@ -51,13 +58,16 @@ export default function GatePassPage() {
   const supabase = createClient();
 
   const fetchGatePasses = async () => {
+    setLoading(true);
+    const endInclusive = new Date(endDate);
+    endInclusive.setDate(endInclusive.getDate() + 1);
+    const end = endInclusive.toISOString().slice(0, 10);
+
     const { data, error } = await supabase
       .from("inward_gate_passes")
-      .select(`
-        *,
-        suppliers ( name ),
-        igp_line_items ( count )
-      `)
+      .select(`*, suppliers(name), igp_line_items(count)`)
+      .gte("received_date", startDate)
+      .lt("received_date", end)
       .order("received_date", { ascending: false });
 
     if (error) {
@@ -84,7 +94,7 @@ export default function GatePassPage() {
 
   useEffect(() => {
     fetchGatePasses();
-  }, []);
+  }, [startDate, endDate]);
 
   const filtered = useMemo(() => {
     let list = [...records];
@@ -143,37 +153,31 @@ export default function GatePassPage() {
   };
 
   return (
-    <>
-      <Header
+    <div className="p-6">
+      <PageHeader
         title="Inward Gate Pass"
-        subtitle="Stage 1 → 2: Material received into factory store"
+        subtitle="Material received into factory store"
         actions={
           <Link href="/gate-pass/new" className="btn-primary">
             <Plus className="h-4 w-4" /> New Gate Pass
           </Link>
         }
       />
-      <main className="flex-1 p-6 space-y-4">
-        {/* Search & Column toggle */}
-        <div className="flex items-center justify-between gap-3">
-          <div className="relative flex-1 max-w-sm">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search by IGP No., Supplier or Vehicle"
-              className="input pl-9"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
 
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <div className="flex items-center gap-3">
+          <label className="text-sm font-medium">From:</label>
+          <input type="date" className="input" value={startDate} onChange={e => setStartDate(e.target.value)} />
+          <label className="text-sm font-medium">To:</label>
+          <input type="date" className="input" value={endDate} onChange={e => setEndDate(e.target.value)} />
+        </div>
+        <div className="flex items-center gap-2">
           <div className="relative">
             <button
-              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 bg-white border border-gray-200 rounded-md px-2.5 py-1.5"
+              className="btn-secondary text-xs flex items-center gap-1"
               onClick={() => setShowColumnMenu(!showColumnMenu)}
             >
-              <Settings2 className="h-3.5 w-3.5" />
-              Columns
+              <Settings2 className="h-3.5 w-3.5" /> Columns
             </button>
             {showColumnMenu && (
               <div className="absolute right-0 mt-1 w-40 bg-white border border-gray-200 rounded-md shadow-lg z-20 text-xs">
@@ -195,96 +199,110 @@ export default function GatePassPage() {
               </div>
             )}
           </div>
+          <button onClick={() => window.print()} className="btn-secondary text-xs flex items-center gap-1">
+            <Printer className="h-3.5 w-3.5" /> Print
+          </button>
         </div>
+      </div>
 
-        <div className="card overflow-hidden">
-          {loading ? (
-            <div className="flex items-center justify-center py-16 text-gray-400">Loading…</div>
-          ) : filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-gray-400">
-              <Truck className="h-10 w-10 mb-3 opacity-30" />
-              <p className="text-sm">
-                {searchQuery ? "No gate passes match your search" : "No gate passes yet"}
-              </p>
-              {!searchQuery && (
-                <Link href="/gate-pass/new" className="btn-primary mt-4">
-                  <Plus className="h-4 w-4" /> Create first gate pass
-                </Link>
-              )}
-            </div>
-          ) : (
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-100">
-                <tr>
+      <div className="relative max-w-sm mb-4">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+        <input
+          type="text"
+          placeholder="Search by IGP No., Supplier or Vehicle"
+          className="input pl-9"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+        />
+      </div>
+
+      <div className="card overflow-hidden">
+        {loading ? (
+          <div className="flex items-center justify-center py-16 text-gray-400">Loading…</div>
+        ) : filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-gray-400">
+            <Truck className="h-10 w-10 mb-3 opacity-30" />
+            <p className="text-sm">
+              {searchQuery ? "No gate passes match your search" : "No gate passes yet"}
+            </p>
+            {!searchQuery && (
+              <Link href="/gate-pass/new" className="btn-primary mt-4">
+                <Plus className="h-4 w-4" /> Create first gate pass
+              </Link>
+            )}
+          </div>
+        ) : (
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 border-b border-gray-100">
+              <tr>
+                {visibleColumns.igp_number && (
+                  <th className="table-th cursor-pointer select-none hover:bg-gray-100 whitespace-nowrap" onClick={() => handleSort("igp_number")}>
+                    <span className="inline-flex items-center">IGP No. {renderSortIcon("igp_number")}</span>
+                  </th>
+                )}
+                {visibleColumns.received_date && (
+                  <th className="table-th cursor-pointer select-none hover:bg-gray-100 whitespace-nowrap" onClick={() => handleSort("received_date")}>
+                    <span className="inline-flex items-center">Date {renderSortIcon("received_date")}</span>
+                  </th>
+                )}
+                {visibleColumns.supplier_name && (
+                  <th className="table-th cursor-pointer select-none hover:bg-gray-100 whitespace-nowrap" onClick={() => handleSort("supplier_name")}>
+                    <span className="inline-flex items-center">Supplier {renderSortIcon("supplier_name")}</span>
+                  </th>
+                )}
+                {visibleColumns.vehicle_number && (
+                  <th className="table-th cursor-pointer select-none hover:bg-gray-100 whitespace-nowrap" onClick={() => handleSort("vehicle_number")}>
+                    <span className="inline-flex items-center">Vehicle {renderSortIcon("vehicle_number")}</span>
+                  </th>
+                )}
+                {visibleColumns.item_count && (
+                  <th className="table-th cursor-pointer select-none hover:bg-gray-100 whitespace-nowrap" onClick={() => handleSort("item_count")}>
+                    <span className="inline-flex items-center">Items {renderSortIcon("item_count")}</span>
+                  </th>
+                )}
+                {visibleColumns.status && (
+                  <th className="table-th cursor-pointer select-none hover:bg-gray-100 whitespace-nowrap" onClick={() => handleSort("status")}>
+                    <span className="inline-flex items-center">Status {renderSortIcon("status")}</span>
+                  </th>
+                )}
+                <th className="table-th whitespace-nowrap"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {filtered.map((r) => (
+                <tr key={r.id} className="hover:bg-gray-50 transition-colors">
                   {visibleColumns.igp_number && (
-                    <th className="table-th cursor-pointer select-none hover:bg-gray-100" onClick={() => handleSort("igp_number")}>
-                      <span className="inline-flex items-center">IGP No. {renderSortIcon("igp_number")}</span>
-                    </th>
+                    <td className="table-td text-xs font-medium font-mono text-brand-600">{r.igp_number}</td>
                   )}
                   {visibleColumns.received_date && (
-                    <th className="table-th cursor-pointer select-none hover:bg-gray-100" onClick={() => handleSort("received_date")}>
-                      <span className="inline-flex items-center">Date {renderSortIcon("received_date")}</span>
-                    </th>
+                    <td className="table-td text-xs font-medium text-gray-700">{formatDate(r.received_date)}</td>
                   )}
                   {visibleColumns.supplier_name && (
-                    <th className="table-th cursor-pointer select-none hover:bg-gray-100" onClick={() => handleSort("supplier_name")}>
-                      <span className="inline-flex items-center">Supplier {renderSortIcon("supplier_name")}</span>
-                    </th>
+                    <td className="table-td text-xs font-medium text-gray-700">{r.supplier_name || "—"}</td>
                   )}
                   {visibleColumns.vehicle_number && (
-                    <th className="table-th cursor-pointer select-none hover:bg-gray-100" onClick={() => handleSort("vehicle_number")}>
-                      <span className="inline-flex items-center">Vehicle {renderSortIcon("vehicle_number")}</span>
-                    </th>
+                    <td className="table-td text-xs font-medium text-gray-700 font-mono">{r.vehicle_number}</td>
                   )}
                   {visibleColumns.item_count && (
-                    <th className="table-th cursor-pointer select-none hover:bg-gray-100" onClick={() => handleSort("item_count")}>
-                      <span className="inline-flex items-center">Items {renderSortIcon("item_count")}</span>
-                    </th>
+                    <td className="table-td text-xs font-medium text-gray-700 text-center">{r.item_count}</td>
                   )}
                   {visibleColumns.status && (
-                    <th className="table-th cursor-pointer select-none hover:bg-gray-100" onClick={() => handleSort("status")}>
-                      <span className="inline-flex items-center">Status {renderSortIcon("status")}</span>
-                    </th>
-                  )}
-                  <th className="table-th"></th> {/* View button column always visible */}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {filtered.map((r) => (
-                  <tr key={r.id} className="hover:bg-gray-50 transition-colors">
-                    {visibleColumns.igp_number && (
-                      <td className="table-td font-mono text-xs font-medium text-brand-600">{r.igp_number}</td>
-                    )}
-                    {visibleColumns.received_date && (
-                      <td className="table-td">{formatDate(r.received_date)}</td>
-                    )}
-                    {visibleColumns.supplier_name && (
-                      <td className="table-td">{r.supplier_name || "—"}</td>
-                    )}
-                    {visibleColumns.vehicle_number && (
-                      <td className="table-td font-mono text-xs">{r.vehicle_number}</td>
-                    )}
-                    {visibleColumns.item_count && (
-                      <td className="table-td text-center">{r.item_count}</td>
-                    )}
-                    {visibleColumns.status && (
-                      <td className="table-td">
-                        <span className={cn("badge", STATUS_STYLE[r.status])}>{r.status}</span>
-                      </td>
-                    )}
-                    <td className="table-td">
-                      <Link href={`/gate-pass/${r.id}`}
-                        className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-brand-600 transition-colors">
-                        <Eye className="h-3.5 w-3.5" /> View
-                      </Link>
+                    <td className="table-td text-xs font-medium">
+                      <span className={cn("badge", STATUS_STYLE[r.status])}>{r.status}</span>
                     </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </main>
-    </>
+                  )}
+                  <td className="table-td text-xs font-medium">
+                    <Link href={`/gate-pass/${r.id}`}
+                      className="inline-flex items-center gap-1 text-brand-600 hover:text-brand-700">
+                      <Eye className="h-3.5 w-3.5" /> View
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
   );
 }
