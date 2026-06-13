@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
-import Header from "@/components/layout/Header";
+import PageHeader from "@/components/layout/PageHeader";
 import Link from "next/link";
 import { ArrowLeft, Printer, Truck } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -39,19 +39,31 @@ export default function GatePassDetailPage() {
   const [gp, setGp] = useState<GatePassDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [companyName, setCompanyName] = useState("MaterialFlow");
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
 
   const supabase = createClient();
 
   useEffect(() => {
     (async () => {
       try {
+        // Fetch company settings
+        const { data: settings } = await supabase
+          .from("company_settings")
+          .select("company_name, logo_url")
+          .limit(1)
+          .maybeSingle();
+        if (settings) {
+          setCompanyName(settings.company_name || "MaterialFlow");
+          setLogoUrl(settings.logo_url || null);
+        }
+
         // Fetch gate pass header + supplier name
         const { data: header, error: headerErr } = await supabase
           .from("inward_gate_passes")
           .select(`*, suppliers(name)`)
           .eq("id", id)
           .single();
-
         if (headerErr) throw headerErr;
 
         // Fetch line items with product name/code
@@ -59,7 +71,6 @@ export default function GatePassDetailPage() {
           .from("igp_line_items")
           .select(`*, products(code, name)`)
           .eq("igp_id", id);
-
         if (itemsErr) throw itemsErr;
 
         setGp({
@@ -99,23 +110,23 @@ export default function GatePassDetailPage() {
 
   if (error || !gp) {
     return (
-      <>
-        <Header title="Gate Pass" />
-        <main className="flex-1 flex flex-col items-center justify-center p-6 text-gray-400 space-y-2">
+      <div className="p-6">
+        <PageHeader title="Gate Pass" />
+        <main className="flex flex-col items-center justify-center py-16 text-gray-400 space-y-2">
           <Truck className="h-10 w-10 opacity-30" />
           <p className="text-sm">{error || "Gate pass not found."}</p>
           <Link href="/gate-pass" className="text-sm text-brand-600 hover:underline">
             ← Back to list
           </Link>
         </main>
-      </>
+      </div>
     );
   }
 
   return (
-    <>
-      <Header
-        title={`Gate Pass: ${gp.igp_number}`}
+    <div className="p-6">
+      <PageHeader
+        title={`Inward Gate Pass: ${gp.igp_number}`}
         subtitle={`Received on ${formatDate(gp.received_date)}`}
         actions={
           <div className="flex gap-2 print:hidden">
@@ -128,72 +139,96 @@ export default function GatePassDetailPage() {
           </div>
         }
       />
-      <main className="flex-1 p-6 max-w-4xl print:max-w-full">
-        <div className="card p-6 space-y-6 print:shadow-none print:border-none">
-          {/* Header Info */}
-          <div className="print:hidden">
-            <span className={cn("badge text-sm", STATUS_STYLE[gp.status])}>{gp.status}</span>
-          </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+      {/* Print‑only header */}
+      <div className="hidden print:block mb-6">
+        <div className="flex items-center justify-between border-b pb-4 mb-4">
+          <div className="flex items-center gap-3">
+            {logoUrl ? (
+              <img src={logoUrl} alt="Logo" className="h-12 w-12 rounded-lg object-contain" />
+            ) : (
+              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-green-400">
+                <Truck className="h-6 w-6 text-white" />
+              </div>
+            )}
             <div>
-              <span className="text-gray-500">Supplier</span>
-              <p className="font-medium">{gp.supplier_name || "—"}</p>
-            </div>
-            <div>
-              <span className="text-gray-500">Vehicle</span>
-              <p className="font-medium">{gp.vehicle_number}</p>
-            </div>
-            <div>
-              <span className="text-gray-500">Driver</span>
-              <p className="font-medium">{gp.driver_name || "—"}</p>
-            </div>
-            <div>
-              <span className="text-gray-500">Received Date</span>
-              <p className="font-medium">{formatDate(gp.received_date)}</p>
+              <h1 className="text-xl font-bold text-gray-900">{companyName}</h1>
+              <p className="text-xs text-gray-500">Inward Gate Pass</p>
             </div>
           </div>
-
-          {gp.notes && (
-            <div>
-              <span className="text-gray-500 text-sm">Notes</span>
-              <p className="text-sm mt-1">{gp.notes}</p>
-            </div>
-          )}
-
-          {/* Line Items Table */}
-          <div>
-            <h3 className="text-sm font-semibold text-gray-700 mb-3">Material Received</h3>
-            <table className="w-full text-sm border border-gray-200 rounded-lg overflow-hidden print:border-gray-300">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-3 py-2 text-left text-gray-600 font-medium">Product</th>
-                  <th className="px-3 py-2 text-left text-gray-600 font-medium">Code</th>
-                  <th className="px-3 py-2 text-right text-gray-600 font-medium">Qty</th>
-                  <th className="px-3 py-2 text-left text-gray-600 font-medium">UOM</th>
-                  <th className="px-3 py-2 text-left text-gray-600 font-medium">Batch No.</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {gp.items.map((item) => (
-                  <tr key={item.id}>
-                    <td className="px-3 py-2 font-medium">{item.product_name}</td>
-                    <td className="px-3 py-2 font-mono text-xs text-brand-600">{item.product_code}</td>
-                    <td className="px-3 py-2 text-right">{item.received_qty}</td>
-                    <td className="px-3 py-2 uppercase text-xs">{item.uom}</td>
-                    <td className="px-3 py-2">{item.batch_number || "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Footer for print */}
-          <div className="hidden print:block text-xs text-gray-500 mt-6 border-t pt-3">
-            Printed on {new Date().toLocaleString()}
+          <div className="text-right">
+            <p className="text-sm font-semibold text-gray-900">{gp.igp_number}</p>
+            <p className="text-xs text-gray-500">Date: {formatDate(gp.received_date)}</p>
           </div>
         </div>
-      </main>
-    </>
+      </div>
+
+      <div className="card p-6 space-y-6 print:shadow-none print:border-none">
+        {/* Status badge */}
+        <div className="print:hidden">
+          <span className={cn("badge text-sm", STATUS_STYLE[gp.status])}>{gp.status}</span>
+        </div>
+
+        {/* Header info grid */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+          <div>
+            <span className="text-xs text-gray-500 font-medium">Supplier</span>
+            <p className="text-sm font-medium text-gray-900 mt-1">{gp.supplier_name || "—"}</p>
+          </div>
+          <div>
+            <span className="text-xs text-gray-500 font-medium">Vehicle Number</span>
+            <p className="text-sm font-medium text-gray-900 mt-1">{gp.vehicle_number}</p>
+          </div>
+          <div>
+            <span className="text-xs text-gray-500 font-medium">Driver Name</span>
+            <p className="text-sm font-medium text-gray-900 mt-1">{gp.driver_name || "—"}</p>
+          </div>
+          <div>
+            <span className="text-xs text-gray-500 font-medium">Received Date</span>
+            <p className="text-sm font-medium text-gray-900 mt-1">{formatDate(gp.received_date)}</p>
+          </div>
+        </div>
+
+        {gp.notes && (
+          <div>
+            <span className="text-xs text-gray-500 font-medium">Notes</span>
+            <p className="text-sm text-gray-700 mt-1">{gp.notes}</p>
+          </div>
+        )}
+
+        {/* Line Items Table */}
+        <div>
+          <h3 className="text-sm font-semibold text-gray-700 mb-3">Material Received</h3>
+          <table className="w-full text-xs border border-gray-200 rounded-lg overflow-hidden print:border-gray-300">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium text-gray-600 whitespace-nowrap">Product</th>
+                <th className="px-3 py-2 text-left font-medium text-gray-600 whitespace-nowrap">Code</th>
+                <th className="px-3 py-2 text-right font-medium text-gray-600 whitespace-nowrap">Qty</th>
+                <th className="px-3 py-2 text-left font-medium text-gray-600 whitespace-nowrap">UOM</th>
+                <th className="px-3 py-2 text-left font-medium text-gray-600 whitespace-nowrap">Batch No.</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {gp.items.map((item) => (
+                <tr key={item.id}>
+                  <td className="px-3 py-2 text-xs font-medium text-gray-700">{item.product_name}</td>
+                  <td className="px-3 py-2 text-xs font-medium font-mono text-brand-600">{item.product_code}</td>
+                  <td className="px-3 py-2 text-xs font-medium text-gray-700 text-right">{item.received_qty.toFixed(2)}</td>
+                  <td className="px-3 py-2 text-xs font-medium text-gray-700 uppercase">{item.uom}</td>
+                  <td className="px-3 py-2 text-xs font-medium text-gray-700">{item.batch_number || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Footer for print */}
+        <div className="hidden print:block text-xs text-gray-500 mt-6 border-t pt-3">
+          <p>Printed on {new Date().toLocaleString()}</p>
+          <p className="mt-1">This is a computer‑generated document.</p>
+        </div>
+      </div>
+    </div>
   );
 }
