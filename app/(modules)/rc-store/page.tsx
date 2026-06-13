@@ -4,11 +4,12 @@ import PageHeader from "@/components/layout/PageHeader";
 import {
   Search, ArrowUpDown, ArrowUp, ArrowDown, Package,
   Send, Printer, X, Settings2,
-  ChevronDown, ChevronRight
+  ChevronDown, ChevronRight, Download
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { StoreType } from "@/types";
+import * as XLSX from 'xlsx';
 
 type RCStockMovement = {
   product_id: string;
@@ -68,6 +69,15 @@ export default function RCStorePage() {
   const [issueQtyKg, setIssueQtyKg] = useState("");
   const [issueQtyBags, setIssueQtyBags] = useState("");
   const [issuing, setIssuing] = useState(false);
+
+  const [companyName, setCompanyName] = useState("MaterialFlow");
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    supabase.from("company_settings").select("company_name, logo_url").limit(1).maybeSingle().then(({ data }) => {
+      if (data) { setCompanyName(data.company_name || "MaterialFlow"); setLogoUrl(data.logo_url || null); }
+    });
+  }, []);
 
   const fetchMovements = async () => {
     setLoading(true);
@@ -160,9 +170,7 @@ export default function RCStorePage() {
 
   useEffect(() => { fetchMovements(); fetchIncoming(); }, [startDate, endDate]);
 
-  const toggleExpand = (id: string) => {
-    setExpandedParents(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  };
+  const toggleExpand = (id: string) => { setExpandedParents(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; }); };
 
   const filtered = useMemo(() => {
     let list = [...movements];
@@ -222,8 +230,51 @@ export default function RCStorePage() {
     setIssuing(true);
     await supabase.from("store_transfers").insert({ from_store: "rc_store", to_store: "material_store", product_id: issueItem.product_id, quantity: qty, uom: issueItem.uom, status: "pending" });
     alert("Sent to Material Store");
-    fetchMovements(); setIssueItem(null); setIssueQtyKg(""); setIssueQtyBags("");
-    setIssuing(false);
+    fetchMovements(); setIssueItem(null); setIssueQtyKg(""); setIssueQtyBags(""); setIssuing(false);
+  };
+
+  const handleExportExcel = async () => {
+    const summaryData = filtered.map(item => ({
+      Code: item.code,
+      Name: item.name,
+      Category: item.category,
+      UOM: item.uom,
+      "Opening (KG)": item.opening_kg,
+      "Received (KG)": item.received_kg,
+      "Issued (KG)": item.issued_kg,
+      "Closing (KG)": item.closing_kg,
+    }));
+
+    const endInclusive = new Date(endDate);
+    endInclusive.setDate(endInclusive.getDate() + 1);
+    const end = endInclusive.toISOString().slice(0, 10);
+
+    const { data: transactions } = await supabase
+      .from("stock_ledger")
+      .select("created_at, txn_type, quantity, direction, reference_type, reference_id, notes, products(name, code)")
+      .eq("store", "rc_store")
+      .gte("created_at", startDate)
+      .lt("created_at", end)
+      .order("created_at", { ascending: true });
+
+    const transactionData = (transactions || []).map((t: any) => ({
+      Date: new Date(t.created_at).toLocaleDateString("en-GB"),
+      Type: t.txn_type,
+      Product: t.products?.name || "Unknown",
+      Code: t.products?.code || "",
+      Direction: t.direction === 1 ? "In" : "Out",
+      Quantity: t.quantity,
+      Reference: t.reference_type || "",
+      "Ref ID": t.reference_id ? t.reference_id.slice(0, 8) : "",
+      Notes: t.notes || "",
+    }));
+
+    const ws1 = XLSX.utils.json_to_sheet(summaryData);
+    const ws2 = XLSX.utils.json_to_sheet(transactionData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws1, "Summary");
+    XLSX.utils.book_append_sheet(wb, ws2, "Transactions");
+    XLSX.writeFile(wb, `rc_store_${startDate}_to_${endDate}.xlsx`);
   };
 
   const renderRow = (item: RCStockMovement) => {
@@ -258,61 +309,45 @@ export default function RCStorePage() {
 
   return (
     <div className="p-6">
-      <PageHeader
-        title="RC Store – Returnable Components"
-        subtitle="Date‑range report"
-        actions={
-          <button className="relative btn-secondary flex items-center gap-2" onClick={() => setShowIncoming(true)}>
-            <Package className="h-4 w-4" />
-            {incoming.length > 0 && (
-              <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center">
-                {incoming.length}
-              </span>
-            )}
-            Incoming
-          </button>
+      <style jsx global>{`
+        @media print {
+          @page { size: landscape; margin: 10mm; }
+          body * { visibility: hidden; }
+          .print-area, .print-area * { visibility: visible; }
+          .print-area { position: absolute; left: 0; top: 0; width: 100%; padding: 15px 20px; }
+          .no-print { display: none !important; }
         }
-      />
+        @media screen {
+          .print-area { display: none; }
+        }
+      `}</style>
 
-      <div className="flex items-center justify-between mb-4 print:hidden">
-        <div className="flex items-center gap-3">
-          <label className="text-sm font-medium">From:</label><input type="date" className="input" value={startDate} onChange={e => setStartDate(e.target.value)} />
-          <label className="text-sm font-medium">To:</label><input type="date" className="input" value={endDate} onChange={e => setEndDate(e.target.value)} />
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="relative">
+      <div className="no-print">
+        <PageHeader
+          title="RC Store – Returnable Components"
+          subtitle="Date‑range report"
+          actions={
+            <button className="relative btn-secondary flex items-center gap-2" onClick={() => setShowIncoming(true)}>
+              <Package className="h-4 w-4" />
+              {incoming.length > 0 && <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-red-500 text-white text-[10px] flex items-center justify-center">{incoming.length}</span>}
+              Incoming
+            </button>
+          }
+        />
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3"><label className="text-sm font-medium">From:</label><input type="date" className="input" value={startDate} onChange={e => setStartDate(e.target.value)} /><label className="text-sm font-medium">To:</label><input type="date" className="input" value={endDate} onChange={e => setEndDate(e.target.value)} /></div>
+          <div className="flex items-center gap-2">
             <button className="btn-secondary text-xs flex items-center gap-1" onClick={() => setShowColumnMenu(!showColumnMenu)}><Settings2 className="h-3.5 w-3.5" /> Columns</button>
-            {showColumnMenu && (
-              <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-md shadow-lg z-20 text-xs">
-                <div className="p-2 space-y-1">
-                  {Object.entries(visibleColumns).map(([k, v]) => (
-                    <label key={k} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded">
-                      <input type="checkbox" checked={v} onChange={() => toggleCol(k as keyof typeof visibleColumns)} className="rounded border-gray-300" />
-                      <span className="capitalize text-gray-600">{k.replace(/_/g, " ")}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
+            <button onClick={() => window.print()} className="btn-secondary text-xs flex items-center gap-1"><Printer className="h-3.5 w-3.5" /> Print</button>
+            <button onClick={handleExportExcel} className="btn-secondary text-xs flex items-center gap-1"><Download className="h-3.5 w-3.5" /> Excel</button>
           </div>
-          <button onClick={() => window.print()} className="btn-secondary text-xs flex items-center gap-1"><Printer className="h-3.5 w-3.5" /> Print</button>
         </div>
-      </div>
-
-      <div className="relative max-w-sm mb-4">
-        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-        <input type="text" placeholder="Search..." className="input pl-9" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
-      </div>
-
-      <div className="flex items-center justify-end mb-2 print:hidden">
-        <span className="text-[10px] text-gray-400 font-medium">All quantities in KG</span>
-      </div>
-
-      <div className="card overflow-hidden">
-        {loading ? <div className="py-16 text-center text-gray-400">Loading…</div> : filtered.length === 0 ? <div className="py-16 text-center text-gray-400">No data.</div> :
-          <table className="w-full text-xs">
-            <thead className="bg-gray-50 border-b border-gray-100">
-              <tr>
+        <div className="relative max-w-sm mb-4"><Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" /><input type="text" placeholder="Search..." className="input pl-9" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} /></div>
+        <div className="flex items-center justify-end mb-2"><span className="text-[10px] text-gray-400 font-medium">All quantities in KG</span></div>
+        <div className="card overflow-hidden">
+          {loading ? <div className="py-16 text-center text-gray-400">Loading…</div> : filtered.length === 0 ? <div className="py-16 text-center text-gray-400">No data.</div> :
+            <table className="w-full text-xs">
+              <thead className="bg-gray-50 border-b border-gray-100"><tr>
                 <th className="table-th w-8 print:hidden whitespace-nowrap"></th>
                 {visibleColumns.code && <th className="table-th cursor-pointer whitespace-nowrap min-w-[100px]" onClick={() => handleSort("code")}>Code {sortIcon("code")}</th>}
                 {visibleColumns.name && <th className="table-th cursor-pointer whitespace-nowrap" onClick={() => handleSort("name")}>Name {sortIcon("name")}</th>}
@@ -323,12 +358,55 @@ export default function RCStorePage() {
                 {visibleColumns.issued_kg && <th className="table-th cursor-pointer text-right whitespace-nowrap" onClick={() => handleSort("issued_kg")}>Issued {sortIcon("issued_kg")}</th>}
                 {visibleColumns.closing_kg && <th className="table-th cursor-pointer text-right whitespace-nowrap" onClick={() => handleSort("closing_kg")}>Closing {sortIcon("closing_kg")}</th>}
                 <th className="table-th print:hidden whitespace-nowrap"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {filtered.map(item => renderRow(item))}
-            </tbody>
-          </table>}
+              </tr></thead>
+              <tbody className="divide-y divide-gray-50">{filtered.map(item => renderRow(item))}</tbody>
+            </table>}
+        </div>
+      </div>
+
+      {/* Print area */}
+      <div className="print-area">
+        <div className="flex items-center justify-between border-b pb-3 mb-4">
+          <div className="flex items-center gap-3">
+            {logoUrl ? <img src={logoUrl} alt="Logo" className="h-10 w-10 rounded-lg object-contain" /> : <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-400"><Package className="h-5 w-5 text-white" /></div>}
+            <div><h1 className="text-lg font-bold text-gray-900">{companyName}</h1><p className="text-[10px] text-gray-500">RC Store Report</p></div>
+          </div>
+          <div className="text-right">
+            <p className="text-xs font-semibold text-gray-900">{startDate} to {endDate}</p>
+            <p className="text-[10px] text-gray-500">Opening + Received – Issued = Closing</p>
+          </div>
+        </div>
+        <table className="w-full text-[10px] border border-gray-200 rounded-lg overflow-hidden mb-4">
+          <thead className="bg-gray-50"><tr>
+            <th className="px-1.5 py-1.5 text-left font-medium text-gray-600 whitespace-nowrap">Code</th>
+            <th className="px-1.5 py-1.5 text-left font-medium text-gray-600 whitespace-nowrap">Name</th>
+            <th className="px-1.5 py-1.5 text-left font-medium text-gray-600 whitespace-nowrap">Cat</th>
+            <th className="px-1.5 py-1.5 text-center font-medium text-gray-600 whitespace-nowrap">UOM</th>
+            <th className="px-1.5 py-1.5 text-right font-medium text-gray-600 whitespace-nowrap">Opening</th>
+            <th className="px-1.5 py-1.5 text-right font-medium text-gray-600 whitespace-nowrap">Received</th>
+            <th className="px-1.5 py-1.5 text-right font-medium text-gray-600 whitespace-nowrap">Issued</th>
+            <th className="px-1.5 py-1.5 text-right font-medium text-gray-600 whitespace-nowrap">Closing</th>
+          </tr></thead>
+          <tbody className="divide-y divide-gray-100">
+            {filtered.map(item => {
+              const isParent = !item.isChild && item.children && item.children.length > 0;
+              const isChild = !!item.isChild;
+              return (
+                <tr key={item.product_id} className={isChild ? "bg-gray-50/50" : ""}>
+                  <td className="px-1.5 py-1 text-xs font-medium font-mono text-gray-700">{isChild && "└ "}{item.code}</td>
+                  <td className="px-1.5 py-1 text-xs font-medium text-gray-700">{item.name}{isParent && <span className="ml-1 text-[8px] text-gray-400">({item.children!.length})</span>}</td>
+                  <td className="px-1.5 py-1 text-xs text-gray-600 whitespace-nowrap">{item.category}</td>
+                  <td className="px-1.5 py-1 text-xs text-gray-600 text-center uppercase">{item.uom}</td>
+                  <td className="px-1.5 py-1 text-xs font-medium text-gray-700 text-right">{item.opening_kg.toFixed(2)}</td>
+                  <td className="px-1.5 py-1 text-xs font-medium text-gray-700 text-right">{item.received_kg.toFixed(2)}</td>
+                  <td className="px-1.5 py-1 text-xs font-medium text-gray-700 text-right">{item.issued_kg.toFixed(2)}</td>
+                  <td className={cn("px-1.5 py-1 text-xs font-medium text-gray-700 text-right", isParent && "font-semibold")}>{item.closing_kg.toFixed(2)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <div className="text-[9px] text-gray-500 border-t pt-2"><p>Printed on {new Date().toLocaleString()} | All quantities in KG</p></div>
       </div>
 
       {/* Incoming modal */}
